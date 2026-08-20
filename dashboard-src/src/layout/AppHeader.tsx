@@ -12,6 +12,8 @@ import {
   type AppDownloadLink,
 } from "../lib/app-downloads";
 import { useConnectionStatus } from "../hooks/useConnectionStatus";
+import { useAuth } from "../context/AuthContext";
+const SUPER_ADMIN_EMAIL = "ahmed-farag@hs.com";
 import { isAdminMobileViewport } from "../lib/admin-layout";
 
 function AppShortcutIcon({ appKey }: { appKey: AppDownloadKey }) {
@@ -98,6 +100,7 @@ function AppShortcutIcon({ appKey }: { appKey: AppDownloadKey }) {
 
 const AppHeader: React.FC = () => {
   const [isApplicationMenuOpen, setApplicationMenuOpen] = useState(false);
+  const { authUser } = useAuth();
   const [appShortcuts, setAppShortcuts] = useState<AppDownloadLink[]>(DEFAULT_APP_DOWNLOAD_LINKS);
   const { status: connectionStatus, pendingCount } = useConnectionStatus();
 
@@ -258,7 +261,7 @@ const AppHeader: React.FC = () => {
           } items-center justify-between w-full gap-4 px-5 py-4 lg:flex shadow-theme-md lg:justify-end lg:px-0 lg:shadow-none`}
         >
           <div className="flex items-center gap-2 2xsm:gap-3">
-            {appShortcuts.map((shortcut) => (
+            {appShortcuts.filter((s) => authUser?.email === SUPER_ADMIN_EMAIL).map((shortcut) => (
               <a
                 key={shortcut.appKey}
                 href={shortcut.href}

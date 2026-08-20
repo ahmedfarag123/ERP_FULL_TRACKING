@@ -75,6 +75,8 @@ export function ActivitySelectCard({
   );
 }
 
+const CUSTOM_SELECT_VALUE = "__custom";
+
 export function CardOptionGroup({
   label,
   options,
@@ -90,21 +92,40 @@ export function CardOptionGroup({
   placeholder?: string;
   activeClass?: string;
 }) {
+  const isCustom = Boolean(value) && !options.some((o) => o.value === value);
+  const selectValue = isCustom ? CUSTOM_SELECT_VALUE : value;
+
   return (
     <section>
       <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">{label}</p>
       {options.length > 0 ? (
-        <div className="grid gap-3 md:grid-cols-2">
-          {options.map((option) => (
-            <ActivitySelectCard
-              key={option.value}
-              active={value === option.value}
-              onClick={() => onChange(option.value)}
-              title={option.label}
-              icon={<SparklesIcon className="h-5 w-5" aria-hidden />}
-              activeClass={activeClass}
+        <div className="space-y-3">
+          <select
+            value={selectValue}
+            onChange={(e) => {
+              const v = e.target.value;
+              onChange(v === CUSTOM_SELECT_VALUE ? "" : v);
+            }}
+            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 shadow-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+          >
+            <option value="">— اختر —</option>
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+            <option value={CUSTOM_SELECT_VALUE}>أخرى / إدخال حر</option>
+          </select>
+
+          {selectValue === CUSTOM_SELECT_VALUE && (
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder="اكتب الخيار هنا..."
+              className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 shadow-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
             />
-          ))}
+          )}
         </div>
       ) : (
         <div className="rounded-2xl border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
@@ -128,40 +149,101 @@ export function CardMultiOptionGroup({
   onChange: (values: string[]) => void;
   placeholder?: string;
 }) {
-  const toggle = (value: string) => {
-    onChange(
-      values.includes(value) ? values.filter((v) => v !== value) : [...values, value],
-    );
+  const customTexts = values.filter((v) => !options.some((o) => o.value === v));
+  const [customInput, setCustomInput] = useState("");
+
+  const toggle = (val: string) => {
+    if (values.includes(val)) {
+      onChange(values.filter((v) => v !== val));
+    } else {
+      onChange([...values, val]);
+    }
+  };
+
+  const addCustom = () => {
+    const trimmed = customInput.trim();
+    if (trimmed && !values.includes(trimmed)) {
+      onChange([...values, trimmed]);
+      setCustomInput("");
+    }
+  };
+
+  const removeCustom = (val: string) => {
+    onChange(values.filter((v) => v !== val));
   };
 
   return (
     <section>
       <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">{label}</p>
       {options.length > 0 ? (
-        <div className="grid gap-3 md:grid-cols-2">
-          {options.map((option) => {
-            const active = values.includes(option.value);
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => toggle(option.value)}
-                className={`flex w-full items-center gap-4 rounded-2xl border p-4 text-right transition-all duration-200 ${
-                  active
-                    ? "border-brand-500 bg-brand-50 text-brand-700 shadow-sm dark:border-brand-400/50 dark:bg-brand-500/15 dark:text-brand-200"
-                    : "border-gray-200 bg-white text-gray-600 hover:border-brand-200 hover:bg-brand-25 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:border-brand-500/30 dark:hover:bg-brand-500/10"
-                }`}
-              >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-25 text-gray-500 dark:bg-white/5 dark:text-gray-300">
-                  <SparklesIcon className="h-5 w-5" aria-hidden />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-bold">{option.label}</div>
-                </div>
-                {active ? <CheckCircleIcon className="h-5 w-5 shrink-0" aria-hidden /> : null}
-              </button>
-            );
-          })}
+        <div className="space-y-3">
+          <div className="grid gap-2 md:grid-cols-2">
+            {options.map((option) => {
+              const active = values.includes(option.value);
+              return (
+                <label
+                  key={option.value}
+                  className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-right transition-all duration-150 ${
+                    active
+                      ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/15 dark:text-blue-200"
+                      : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-brand-25 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:border-gray-700"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={active}
+                    onChange={() => toggle(option.value)}
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500/30"
+                  />
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold">{option.label}</span>
+                </label>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={customInput}
+              onChange={(e) => setCustomInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addCustom();
+                }
+              }}
+              placeholder="أضف خياراً مخصصاً..."
+              className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 shadow-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+            />
+            <button
+              type="button"
+              onClick={addCustom}
+              disabled={!customInput.trim()}
+              className="shrink-0 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-brand-25 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300 dark:hover:bg-gray-900"
+            >
+              إضافة
+            </button>
+          </div>
+
+          {customTexts.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {customTexts.map((ct) => (
+                <span
+                  key={ct}
+                  className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-500/20 dark:text-blue-300"
+                >
+                  {ct}
+                  <button
+                    type="button"
+                    onClick={() => removeCustom(ct)}
+                    className="ml-0.5 rounded-full p-0.5 hover:bg-blue-200 dark:hover:bg-blue-500/30"
+                  >
+                    x
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <div className="rounded-2xl border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">

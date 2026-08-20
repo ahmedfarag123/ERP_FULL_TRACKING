@@ -718,6 +718,13 @@ export function CustomerProfileCardSelector({
   const [selectedCategorySlots, setSelectedCategorySlots] = useState<CategorySlot[]>([]);
   const [selectedBrandKeys, setSelectedBrandKeys] = useState<Set<string>>(new Set());
 
+  const [customCustomerType, setCustomCustomerType] = useState<string | null>(null);
+  const [customSpeciality, setCustomSpeciality] = useState<string | null>(null);
+  const [customCategoryText, setCustomCategoryText] = useState("");
+  const [customBrandText, setCustomBrandText] = useState("");
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [customBrands, setCustomBrands] = useState<string[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -954,17 +961,43 @@ export function CustomerProfileCardSelector({
       {/* 1. Customer Type */}
       <section>
         <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">١. فئة العميل</p>
-        <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
-          {customerTypes.map((option) => (
-            <ActivitySelectCard
-              key={option.customer_type_key}
-              active={customerTypeKey === option.customer_type_key}
-              onClick={() => handleCustomerTypeChange(option.customer_type_key, option.customer_type_name_ar)}
-              title={option.customer_type_name_ar}
-              subtitle="يحدد التخصصات المتاحة"
-              icon={<BuildingStorefrontIcon className="h-5 w-5" aria-hidden />}
+        <div className="space-y-3">
+          <select
+            value={customCustomerType !== null ? CUSTOM_SELECT_VALUE : customerTypeKey}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === CUSTOM_SELECT_VALUE) {
+                setCustomCustomerType("");
+                handleCustomerTypeChange("", "");
+              } else {
+                setCustomCustomerType(null);
+                const opt = customerTypes.find((t) => t.customer_type_key === v);
+                if (opt) handleCustomerTypeChange(opt.customer_type_key, opt.customer_type_name_ar);
+              }
+            }}
+            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 shadow-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+          >
+            <option value="">— اختر فئة العميل —</option>
+            {customerTypes.map((t) => (
+              <option key={t.customer_type_key} value={t.customer_type_key}>{t.customer_type_name_ar}</option>
+            ))}
+            <option value={CUSTOM_SELECT_VALUE}>أخرى / إدخال حر</option>
+          </select>
+          {customCustomerType !== null && (
+            <input
+              type="text"
+              value={customCustomerType}
+              onChange={(e) => setCustomCustomerType(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && customCustomerType.trim()) {
+                  e.preventDefault();
+                  handleCustomerTypeChange(`custom_${Date.now()}`, customCustomerType.trim());
+                }
+              }}
+              placeholder="اكتب فئة العميل هنا..."
+              className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 shadow-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
             />
-          ))}
+          )}
         </div>
       </section>
 
@@ -972,72 +1005,181 @@ export function CustomerProfileCardSelector({
       {customerTypeKey ? (
         <section>
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">٢. التخصص</p>
-          <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
-            {specialityOptions.map((option) => (
-              <ActivitySelectCard
-                key={`${option.customer_type_key}:${option.speciality_key}`}
-                active={specialityKey === option.speciality_key}
-                onClick={() => handleSpecialityChange(option.speciality_key)}
-                title={option.speciality_name_ar}
-                subtitle="يحدد تصنيفات المنتجات المناسبة"
-                icon={<RectangleGroupIcon className="h-5 w-5" aria-hidden />}
+          <div className="space-y-3">
+            <select
+              value={customSpeciality !== null ? CUSTOM_SELECT_VALUE : specialityKey}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === CUSTOM_SELECT_VALUE) {
+                  setCustomSpeciality("");
+                  handleSpecialityChange("");
+                } else {
+                  setCustomSpeciality(null);
+                  handleSpecialityChange(v);
+                }
+              }}
+              className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 shadow-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+            >
+              <option value="">— اختر التخصص —</option>
+              {specialityOptions.map((s) => (
+                <option key={`${s.customer_type_key}:${s.speciality_key}`} value={s.speciality_key}>{s.speciality_name_ar}</option>
+              ))}
+              <option value={CUSTOM_SELECT_VALUE}>أخرى / إدخال حر</option>
+            </select>
+            {customSpeciality !== null && (
+              <input
+                type="text"
+                value={customSpeciality}
+                onChange={(e) => setCustomSpeciality(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && customSpeciality.trim()) {
+                    e.preventDefault();
+                    handleSpecialityChange(`custom_${Date.now()}`);
+                  }
+                }}
+                placeholder="اكتب التخصص هنا..."
+                className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 shadow-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
               />
-            ))}
+            )}
           </div>
         </section>
       ) : null}
 
       {/* 3. Categories — multi-select */}
-      {specialityKey ? (
+      {(specialityKey || customSpeciality !== null) ? (
         <section>
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
             ٣. التصنيفات <span className="text-blue-600 dark:text-blue-400">(اختر واحد أو أكثر)</span>
           </p>
-          {availableCategories.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-gray-200 px-4 py-5 text-center text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
-              لا توجد تصنيفات متاحة
+          <div className="space-y-3">
+            {availableCategories.length > 0 && (
+              <div className="grid gap-2 md:grid-cols-2">
+                {availableCategories.map((cat) => {
+                  const combined = `${cat.category_key}:${cat.subcategory_key}`;
+                  const checked = selectedCategoryKeys.has(combined);
+                  return (
+                    <label key={combined} className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-right transition-all duration-150 ${checked ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/15 dark:text-blue-200" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-brand-25 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:border-gray-700"}`}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleCategory(cat)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500/30" />
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{cat.category_name_ar}</span>
+                      {cat.subcategory_name_ar ? <span className="truncate text-xs opacity-60">{cat.subcategory_name_ar}</span> : null}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            {availableCategories.length === 0 && customCategories.length === 0 && (
+              <div className="rounded-xl border border-dashed border-gray-200 px-4 py-5 text-center text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
+                لا توجد تصنيفات متاحة — يمكنك إدخال تصنيفاً مخصصاً
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={customCategoryText}
+                onChange={(e) => setCustomCategoryText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && customCategoryText.trim()) {
+                    e.preventDefault();
+                    setCustomCategories((prev) => [...prev, customCategoryText.trim()]);
+                    setCustomCategoryText("");
+                  }
+                }}
+                placeholder="أضف تصنيفاً مخصصاً..."
+                className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 shadow-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (customCategoryText.trim()) {
+                    setCustomCategories((prev) => [...prev, customCategoryText.trim()]);
+                    setCustomCategoryText("");
+                  }
+                }}
+                disabled={!customCategoryText.trim()}
+                className="shrink-0 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-brand-25 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300 dark:hover:bg-gray-900"
+              >
+                إضافة
+              </button>
             </div>
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {availableCategories.map((cat) => {
-                const combined = `${cat.category_key}:${cat.subcategory_key}`;
-                return (
-                  <CheckItem
-                    key={combined}
-                    checked={selectedCategoryKeys.has(combined)}
-                    onChange={() => toggleCategory(cat)}
-                    label={cat.category_name_ar}
-                    subtitle={cat.subcategory_name_ar || undefined}
-                  />
-                );
-              })}
-            </div>
-          )}
+            {customCategories.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {customCategories.map((c, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-500/20 dark:text-blue-300">
+                    {c}
+                    <button type="button" onClick={() => setCustomCategories((prev) => prev.filter((_, idx) => idx !== i))} className="ml-0.5 rounded-full p-0.5 hover:bg-blue-200 dark:hover:bg-blue-500/30">x</button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </section>
       ) : null}
 
       {/* 4. Brands — multi-select, filtered by selected categories */}
-      {selectedCategorySlots.length > 0 ? (
+      {(selectedCategorySlots.length > 0 || customCategories.length > 0) ? (
         <section>
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
             ٤. البراندات <span className="text-blue-600 dark:text-blue-400">(اختر واحد أو أكثر)</span>
           </p>
-          {availableBrands.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-gray-200 px-4 py-5 text-center text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
-              لا توجد براندات متاحة للتصنيفات المحددة
+          <div className="space-y-3">
+            {availableBrands.length > 0 && (
+              <div className="grid gap-2 md:grid-cols-2">
+                {availableBrands.map((brand) => {
+                  const checked = selectedBrandKeys.has(brand.brand_key);
+                  return (
+                    <label key={brand.brand_key} className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-right transition-all duration-150 ${checked ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/15 dark:text-blue-200" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-brand-25 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:border-gray-700"}`}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleBrand(brand.brand_key)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500/30" />
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{brand.brand_name_ar}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            {availableBrands.length === 0 && customBrands.length === 0 && (
+              <div className="rounded-xl border border-dashed border-gray-200 px-4 py-5 text-center text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
+                لا توجد براندات متاحة — يمكنك إدخال براند مخصص
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={customBrandText}
+                onChange={(e) => setCustomBrandText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && customBrandText.trim()) {
+                    e.preventDefault();
+                    setCustomBrands((prev) => [...prev, customBrandText.trim()]);
+                    setCustomBrandText("");
+                  }
+                }}
+                placeholder="أضف برانداً مخصصاً..."
+                className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 shadow-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (customBrandText.trim()) {
+                    setCustomBrands((prev) => [...prev, customBrandText.trim()]);
+                    setCustomBrandText("");
+                  }
+                }}
+                disabled={!customBrandText.trim()}
+                className="shrink-0 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-brand-25 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300 dark:hover:bg-gray-900"
+              >
+                إضافة
+              </button>
             </div>
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
-              {availableBrands.map((brand) => (
-                <CheckItem
-                  key={brand.brand_key}
-                  checked={selectedBrandKeys.has(brand.brand_key)}
-                  onChange={() => toggleBrand(brand.brand_key)}
-                  label={brand.brand_name_ar}
-                />
-              ))}
-            </div>
-          )}
+            {customBrands.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {customBrands.map((b, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-500/20 dark:text-blue-300">
+                    {b}
+                    <button type="button" onClick={() => setCustomBrands((prev) => prev.filter((_, idx) => idx !== i))} className="ml-0.5 rounded-full p-0.5 hover:bg-blue-200 dark:hover:bg-blue-500/30">x</button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </section>
       ) : null}
 

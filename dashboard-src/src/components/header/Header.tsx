@@ -4,6 +4,7 @@ import NotificationDropdown from "./NotificationDropdown";
 import UserDropdown from "./UserDropdown";
 import { Link } from "react-router";
 import { DRIVER_APP_URL, DISPATCHER_APP_URL } from "../../lib/external-apps";
+import { useAuth } from "../../context/AuthContext";
 
 const appShortcuts = [
   {
@@ -45,7 +46,10 @@ interface HeaderProps {
   onClick?: () => void; // Optional function that takes no arguments and returns void
   onToggle: () => void;
 }
+const SUPER_ADMIN_EMAIL = "ahmed-farag@hs.com";
+
 const Header: React.FC<HeaderProps> = ({ onClick, onToggle }) => {
+  const { authUser } = useAuth();
   const [isApplicationMenuOpen, setApplicationMenuOpen] = useState(false);
 
   const toggleApplicationMenu = () => {
@@ -178,7 +182,7 @@ const Header: React.FC<HeaderProps> = ({ onClick, onToggle }) => {
           } items-center justify-between w-full gap-4 px-5 py-4 lg:flex shadow-theme-md lg:justify-end lg:px-0 lg:shadow-none`}
         >
           <div className="flex items-center gap-2 2xsm:gap-3">
-            {appShortcuts.map((shortcut) => (
+            {appShortcuts.filter((s) => authUser?.email === SUPER_ADMIN_EMAIL).map((shortcut) => (
               <a
                 key={shortcut.href}
                 href={shortcut.href}

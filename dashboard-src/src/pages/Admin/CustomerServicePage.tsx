@@ -306,7 +306,7 @@ export default function CustomerServicePage() {
                     type="search"
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder="بحث في التذاكر..."
+                    placeholder="بحث بالموضوع أو رقم الطلب أو اسم العميل..."
                     className="h-11 w-full rounded-xl border border-gray-300 bg-white pl-11 pr-4 text-sm text-gray-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                   />
                 </label>

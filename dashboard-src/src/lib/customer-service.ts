@@ -146,7 +146,18 @@ export async function fetchTickets(filters?: {
   }
   if (filters?.search) {
     const term = filters.search.trim().toLowerCase();
-    query = query.or(`subject.ilike.%${term}%,description.ilike.%${term}%`);
+    const conditions = [`subject.ilike.%${term}%`, `description.ilike.%${term}%`];
+    // Also search by order number: find matching order IDs first
+    const { data: matchedOrders } = await supabase
+      .from("orders")
+      .select("id")
+      .or(`odoo_order_name.ilike.%${term}%,external_order_id.ilike.%${term}%,customer_name.ilike.%${term}%`)
+      .limit(500);
+    const matchedOrderIds = (matchedOrders ?? []).map((o: { id: string }) => o.id);
+    if (matchedOrderIds.length > 0) {
+      conditions.push(`order_id.in.(${matchedOrderIds.join(",")})`);
+    }
+    query = query.or(conditions.join(","));
   }
 
   query = query.range(offset, offset + limit - 1);

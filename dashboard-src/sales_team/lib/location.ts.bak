@@ -1,0 +1,227 @@
+export interface Coordinates {
+  lat: number
+  lng: number
+  accuracy?: number | null
+  altitude?: number | null
+  heading?: number | null
+  speed?: number | null
+  timestamp?: number
+}
+
+export type LocationErrorCode = 'PERMISSION_DENIED' | 'POSITION_UNAVAILABLE' | 'TIMEOUT' | 'UNSUPPORTED' | 'UNKNOWN'
+
+export type LocationErrorHandler = (error: LocationRequestError) => void
+
+type BestEffortLocationOptions = {
+  fallback?: Coordinates | null
+  preferCached?: boolean
+  maxCachedAgeMs?: number
+  timeoutMs?: number
+  maximumAgeMs?: number
+  enableHighAccuracy?: boolean
+}
+
+const DEFAULT_LOCATION_TIMEOUT_MS = 8_000
+const DEFAULT_MAXIMUM_AGE_MS = 60_000
+const DEFAULT_CACHED_LOCATION_AGE_MS = 2 * 60_000
+
+let lastKnownPosition: Coordinates | null = null
+
+export class LocationRequestError extends Error {
+  code: LocationErrorCode
+
+  constructor(code: LocationErrorCode, message: string) {
+    super(message)
+    this.name = 'LocationRequestError'
+    this.code = code
+  }
+}
+
+function isFiniteCoordinate(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isUsableCoordinates(value: Coordinates | null | undefined): value is Coordinates {
+  return Boolean(value && isFiniteCoordinate(value.lat) && isFiniteCoordinate(value.lng))
+}
+
+function normalizeBrowserPosition(position: GeolocationPosition): Coordinates {
+  return {
+    lat: position.coords.latitude,
+    lng: position.coords.longitude,
+    accuracy: position.coords.accuracy,
+    altitude: position.coords.altitude,
+    heading: position.coords.heading,
+    speed: position.coords.speed,
+    timestamp: position.timestamp || Date.now(),
+  }
+}
+
+function mapGeolocationError(error: GeolocationPositionError): LocationRequestError {
+  if (error.code === error.PERMISSION_DENIED) {
+    return new LocationRequestError('PERMISSION_DENIED', 'تم رفض الصلاحية. فعّل خدمات الموقع من الإعدادات.')
+  }
+
+  if (error.code === error.POSITION_UNAVAILABLE) {
+    return new LocationRequestError('POSITION_UNAVAILABLE', 'الموقع غير متاح. تحقق من خدمات الموقع وحاول مرة أخرى.')
+  }
+
+  if (error.code === error.TIMEOUT) {
+    return new LocationRequestError('TIMEOUT', 'انتهت مهلة طلب الموقع. تأكد من تفعيل خدمة الموقع وحاول مرة أخرى.')
+  }
+
+  return new LocationRequestError('UNKNOWN', error.message || 'تعذر تحديد موقعك.')
+}
+
+export function setLastKnownPosition(position: Coordinates | null | undefined): Coordinates | null {
+  if (!isUsableCoordinates(position)) return null
+
+  lastKnownPosition = {
+    ...position,
+    timestamp: position.timestamp ?? Date.now(),
+  }
+
+  return lastKnownPosition
+}
+
+export function getLastKnownPosition(maxAgeMs = DEFAULT_CACHED_LOCATION_AGE_MS): Coordinates | null {
+  if (!lastKnownPosition) return null
+  if (!lastKnownPosition.timestamp) return lastKnownPosition
+
+  return Date.now() - lastKnownPosition.timestamp <= maxAgeMs ? lastKnownPosition : null
+}
+
+function toRadians(value: number) {
+  return (value * Math.PI) / 180
+}
+
+export function distanceMeters(start: Coordinates, end: Coordinates) {
+  const earthRadius = 6_371_000
+  const dLat = toRadians(end.lat - start.lat)
+  const dLng = toRadians(end.lng - start.lng)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(start.lat)) *
+      Math.cos(toRadians(end.lat)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2)
+
+  return earthRadius * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)))
+}
+
+export function distanceKilometers(start: Coordinates, end: Coordinates) {
+  return distanceMeters(start, end) / 1000
+}
+
+export function formatDistanceCompact(distanceInKm: number) {
+  if (distanceInKm < 1) {
+    return `${Math.round(distanceInKm * 1000).toLocaleString('ar-EG')} م`
+  }
+  return `${distanceInKm.toLocaleString('ar-EG', { maximumFractionDigits: 1 })} كم`
+}
+
+export function formatDistanceMeters(distanceInMeters: number) {
+  if (distanceInMeters < 1000) {
+    return `${Math.round(distanceInMeters).toLocaleString('ar-EG')} م`
+  }
+  return `${(distanceInMeters / 1000).toLocaleString('ar-EG', { maximumFractionDigits: 1 })} كم`
+}
+
+export function getCurrentPosition(options: PositionOptions = {}): Promise<Coordinates> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      reject(new LocationRequestError('UNSUPPORTED', 'الموقع الجغرافي غير مدعوم في هذا المتصفح.'))
+      return
+    }
+
+    let resolved = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    const timeoutMs = options.timeout ?? DEFAULT_LOCATION_TIMEOUT_MS
+
+    timeoutId = setTimeout(() => {
+      if (!resolved) {
+        resolved = true
+        reject(new LocationRequestError('TIMEOUT', 'انتهت مهلة طلب الموقع. استخدام آخر نقطة موقع معروفة قد يكون أفضل من الانتظار.'))
+      }
+    }, timeoutMs + 1_000)
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        if (!resolved) {
+          resolved = true
+          if (timeoutId) clearTimeout(timeoutId)
+          const nextPosition = setLastKnownPosition(normalizeBrowserPosition(position))
+          if (nextPosition) resolve(nextPosition)
+          else reject(new LocationRequestError('POSITION_UNAVAILABLE', 'أعاد المتصفح موقعا غير صالح.'))
+        }
+      },
+      (error) => {
+        if (!resolved) {
+          resolved = true
+          if (timeoutId) clearTimeout(timeoutId)
+          reject(mapGeolocationError(error))
+        }
+      },
+      {
+        enableHighAccuracy: options.enableHighAccuracy ?? true,
+        maximumAge: options.maximumAge ?? DEFAULT_MAXIMUM_AGE_MS,
+        timeout: timeoutMs,
+      }
+    )
+  })
+}
+
+export async function getBestEffortPosition({
+  fallback,
+  preferCached = true,
+  maxCachedAgeMs = DEFAULT_CACHED_LOCATION_AGE_MS,
+  timeoutMs = DEFAULT_LOCATION_TIMEOUT_MS,
+  maximumAgeMs = DEFAULT_MAXIMUM_AGE_MS,
+  enableHighAccuracy = true,
+}: BestEffortLocationOptions = {}): Promise<Coordinates> {
+  const fallbackPosition = setLastKnownPosition(fallback)
+
+  if (preferCached) {
+    const cachedPosition = getLastKnownPosition(maxCachedAgeMs)
+    if (cachedPosition) return cachedPosition
+  }
+
+  try {
+    return await getCurrentPosition({
+      enableHighAccuracy,
+      maximumAge: maximumAgeMs,
+      timeout: timeoutMs,
+    })
+  } catch (error) {
+    const cachedPosition = getLastKnownPosition(Number.POSITIVE_INFINITY)
+    if (cachedPosition) return cachedPosition
+    if (fallbackPosition) return fallbackPosition
+    throw error
+  }
+}
+
+export function watchLocation(
+  onLocation: (position: Coordinates) => void,
+  onError?: LocationErrorHandler,
+  options: PositionOptions = {}
+) {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) {
+    onError?.(new LocationRequestError('UNSUPPORTED', 'الموقع الجغرافي غير مدعوم في هذا المتصفح.'))
+    return () => undefined
+  }
+
+  const watchId = navigator.geolocation.watchPosition(
+    (position) => {
+      const nextPosition = setLastKnownPosition(normalizeBrowserPosition(position))
+      if (nextPosition) onLocation(nextPosition)
+    },
+    (error) => onError?.(mapGeolocationError(error)),
+    {
+      enableHighAccuracy: options.enableHighAccuracy ?? true,
+      maximumAge: options.maximumAge ?? DEFAULT_MAXIMUM_AGE_MS,
+      timeout: options.timeout ?? 10_000,
+    }
+  )
+
+  return () => navigator.geolocation.clearWatch(watchId)
+}

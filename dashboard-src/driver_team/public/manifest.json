@@ -1,0 +1,113 @@
+{
+  "id": "/driver/",
+  "short_name": "السائق",
+  "name": "هوريكا سمارت | تطبيق السائق",
+  "description": "تطبيق عربي للسائق لإدارة نقاط التسليم، خط السير، التتبع المباشر، التحصيل، وإثبات التسليم.",
+  "start_url": "/driver/",
+  "scope": "/driver/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "browser"],
+  "orientation": "portrait-primary",
+  "theme_color": "#065f46",
+  "background_color": "#065f46",
+  "lang": "ar-EG",
+  "dir": "rtl",
+  "prefer_related_applications": false,
+  "categories": ["business", "productivity", "navigation"],
+  "icons": [
+    {
+      "src": "/driver/driver-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/driver/driver-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/driver/manifest-icon-192.maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/driver/manifest-icon-512.maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/driver/apple-icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/driver/screenshots/driver-layout-mobile-login.png",
+      "sizes": "375x812",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "تسجيل دخول السائق"
+    },
+    {
+      "src": "/driver/screenshots/driver-layout-mobile-dashboard-scrolled.png",
+      "sizes": "320x700",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "لوحة التسليمات اليومية"
+    },
+    {
+      "src": "/driver/screenshots/driver-route-gated.png",
+      "sizes": "500x812",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "متابعة خط السير"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "لوحة السائق",
+      "short_name": "الرئيسية",
+      "description": "فتح لوحة تسليمات اليوم",
+      "url": "/driver/#/dashboard",
+      "icons": [
+        {
+          "src": "/driver/driver-icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "التسليمات",
+      "short_name": "النقاط",
+      "description": "فتح التسليمات المسندة",
+      "url": "/driver/#/deliveries",
+      "icons": [
+        {
+          "src": "/driver/driver-icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "خط السير",
+      "short_name": "المسار",
+      "description": "فتح نقاط خط السير",
+      "url": "/driver/#/route",
+      "icons": [
+        {
+          "src": "/driver/driver-icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

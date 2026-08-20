@@ -1,0 +1,26 @@
+{
+  "short_name": "هوريكا",
+  "name": "هوريكا سمارت - لوحة التحكم",
+  "description": "لوحة تحكم إدارة المبيعات والعملاء والطلبات واللوجستيات",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#065f46",
+  "background_color": "#ffffff",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

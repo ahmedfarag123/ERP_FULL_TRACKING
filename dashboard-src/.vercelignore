@@ -1,0 +1,17 @@
+output/
+.opencode/
+landing-page/
+platform-operating-model/
+master-data/
+scrapers/
+supabase/migrations/
+supabase/seed.sql
+supabase/scripts/
+supabase/config.toml
+supabase/functions/
+supabase/*.md
+scripts/
+*.md
+.git/
+.gitignore
+node_modules/

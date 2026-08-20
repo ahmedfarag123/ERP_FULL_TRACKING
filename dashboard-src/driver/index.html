@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ar-EG" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link rel="manifest" href="driver-manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="driver-icon-192.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta
+      name="description"
+      content="تطبيق السائق لإدارة الشحنات المسندة، خط السير، التتبع المباشر، التحصيل، وإثبات التسليم."
+    />
+    <meta name="application-name" content="هوريكا سمارت | تطبيق السائق" />
+    <meta name="theme-color" content="#202a30" />
+    <meta name="msapplication-TileColor" content="#202a30" />
+    <meta name="format-detection" content="telephone=no" />
+    <script>
+      (function () {
+        var host = window.location.hostname;
+        var isLocalhost = host === "localhost" || host === "127.0.0.1" || host === "::1";
+        var url = new URL(window.location.href);
+        var alreadyCleaned = url.searchParams.get("sw-dev-clean") === "1";
+
+        if (!isLocalhost || alreadyCleaned || !("serviceWorker" in navigator)) {
+          return;
+        }
+
+        navigator.serviceWorker.addEventListener("controllerchange", function (event) {
+          event.stopImmediatePropagation();
+        }, { once: true, capture: true });
+
+        navigator.serviceWorker.getRegistrations().then(function (registrations) {
+          if (!registrations.length) {
+            return;
+          }
+
+          return Promise.all(
+            registrations.map(function (registration) {
+              return registration.unregister();
+            })
+          ).then(function () {
+            if (!("caches" in window)) {
+              return;
+            }
+
+            return caches.keys().then(function (keys) {
+              return Promise.all(
+                keys.map(function (key) {
+                  return caches.delete(key);
+                })
+              );
+            });
+          }).then(function () {
+            url.searchParams.set("sw-dev-clean", "1");
+            window.location.replace(url.toString());
+          });
+        }).catch(function () {
+          return undefined;
+        });
+      })();
+    </script>
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="هوريكا سمارت | السائق" />
+    <title>هوريكا سمارت | تطبيق السائق</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+    <script>
+      if (
+        "serviceWorker" in navigator &&
+        !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)
+      ) {
+        window.addEventListener("load", function () {
+          navigator.serviceWorker.register("driver-sw.js").catch(function (error) {
+            console.warn("Driver service worker registration failed:", error);
+          });
+        });
+      }
+    </script>
+  </body>
+</html>

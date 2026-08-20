@@ -1,0 +1,87 @@
+{
+  "id": "/driver/",
+  "name": "هوريكا سمارت | تطبيق السائق",
+  "short_name": "السائق",
+  "description": "تطبيق عربي للسائق لإدارة نقاط التسليم، خط السير، التتبع المباشر، التحصيل، وإثبات التسليم.",
+  "start_url": "/driver/",
+  "scope": "/driver/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui", "browser"],
+  "orientation": "portrait-primary",
+  "background_color": "#202a30",
+  "theme_color": "#202a30",
+  "categories": ["business", "productivity", "navigation"],
+  "lang": "ar-EG",
+  "dir": "rtl",
+  "prefer_related_applications": false,
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "icons": [
+    {
+      "src": "/driver/driver-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/driver/driver-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/driver/driver-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/driver/driver-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/driver/driver-dashboard-shot.png",
+      "sizes": "430x932",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "لوحة السائق مع التسليمات المسندة"
+    },
+    {
+      "src": "/driver/driver-dashboard-shot.png",
+      "sizes": "430x932",
+      "type": "image/png",
+      "label": "الرئيسية في تطبيق السائق"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "التسليمات",
+      "short_name": "النقاط",
+      "url": "/driver/#/deliveries",
+      "icons": [
+        {
+          "src": "/driver/driver-icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "خط السير",
+      "short_name": "المسار",
+      "url": "/driver/#/route",
+      "icons": [
+        {
+          "src": "/driver/driver-icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ar-EG" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>غير متصل | هوريكا سمارت</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: system-ui, -apple-system, sans-serif; background: #f9fafb; color: #111827; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+      .container { text-align: center; padding: 2rem; max-width: 400px; }
+      .icon { width: 80px; height: 80px; margin: 0 auto 1.5rem; background: #fef2f2; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+      .icon svg { width: 40px; height: 40px; color: #ef4444; }
+      h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem; }
+      p { color: #6b7280; font-size: 0.95rem; line-height: 1.6; margin-bottom: 1.5rem; }
+      button { background: #321fdb; color: white; border: none; padding: 0.75rem 2rem; border-radius: 12px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+      button:hover { background: #2a17b8; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="icon">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+        </svg>
+      </div>
+      <h1>أنت غير متصل بالإنترنت</h1>
+      <p>تحقق من اتصال الشبكة وحاول مرة أخرى. بعض البيانات المخزنة قد تكون متاحة عند عودة الاتصال.</p>
+      <button onclick="window.location.reload()">إعادة المحاولة</button>
+    </div>
+  </body>
+</html>

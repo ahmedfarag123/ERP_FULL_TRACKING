@@ -1,0 +1,5 @@
+project_id = "local"
+[db]
+port = 5432
+[api]
+port = 8001

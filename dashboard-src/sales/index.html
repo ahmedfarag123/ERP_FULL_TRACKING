@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ar-EG" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <base href="/sales/" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link rel="manifest" href="sales-manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="sales-icon-192.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta
+      name="description"
+      content="تطبيق عربي لمندوبي مبيعات الجملة لإدارة عملاء التجزئة، الزيارات، خط السير، ومتابعة الطلبات."
+    />
+    <meta name="application-name" content="هوريكا سمارت | تطبيق مندوب المبيعات" />
+    <meta name="theme-color" content="#0a0f1e" />
+    <meta name="msapplication-TileColor" content="#0a0f1e" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="هوريكا سمارت | المبيعات" />
+    <script>
+      (function () {
+        var host = window.location.hostname;
+        var isLocalhost = host === "localhost" || host === "127.0.0.1" || host === "::1";
+        if (!isLocalhost || !("serviceWorker" in navigator)) return;
+
+        var cleanupKey = "sales-dev-sw-cleaned";
+        var reloadKey = "sales-dev-sw-controller-reload";
+        var url = new URL(window.location.href);
+
+        if (url.searchParams.get("sw-dev-clean") === "1") {
+          url.searchParams.delete("sw-dev-clean");
+          window.history.replaceState({}, "", url.toString());
+        }
+
+        try {
+          Object.defineProperty(navigator.serviceWorker, "register", {
+            configurable: true,
+            value: function () {
+              return Promise.reject(new Error("Service worker registration is disabled in local dev."));
+            }
+          });
+        } catch (error) {
+          // Some browsers expose register as read-only; cleanup still proceeds.
+        }
+
+        if (window.sessionStorage.getItem(cleanupKey) === "true") return;
+
+        navigator.serviceWorker.addEventListener("controllerchange", function (event) {
+          event.stopImmediatePropagation();
+        }, { once: true, capture: true });
+
+        navigator.serviceWorker.getRegistrations().then(function (registrations) {
+          return Promise.all(
+            registrations.map(function (registration) {
+              return registration.unregister();
+            })
+          ).then(function () {
+            if (!("caches" in window)) return;
+            return caches.keys().then(function (keys) {
+              return Promise.all(keys.map(function (key) {
+                return caches.delete(key);
+              }));
+            });
+          }).then(function () {
+            window.sessionStorage.setItem(cleanupKey, "true");
+            if (
+              navigator.serviceWorker.controller &&
+              window.sessionStorage.getItem(reloadKey) !== "true"
+            ) {
+              window.sessionStorage.setItem(reloadKey, "true");
+              url.searchParams.set("sw-dev-clean", "1");
+              window.location.replace(url.toString());
+            }
+          });
+        }).catch(function () {
+          return undefined;
+        });
+      })();
+    </script>
+    <title>هوريكا سمارت | تطبيق مندوب المبيعات</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+    <script>
+      if (
+        "serviceWorker" in navigator &&
+        !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)
+      ) {
+        window.addEventListener("load", function () {
+          navigator.serviceWorker.register("sales-sw.js?v=2").catch(function (error) {
+            console.warn("Sales service worker registration failed:", error);
+          });
+        });
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ar-EG" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#065f46" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="هوريكا سمارت | المخزن" />
+    <meta name="description" content="تطبيق المخزن لإدارة الطلبات والشحنات، مسح الباركود، تحديث حالة الطلبات، ومتابعة المخزون." />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" type="image/png" href="dispatcher-icon-192.png" />
+    <link rel="icon" href="favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" href="apple-icon-180.png" />
+    <title>هوريكا سمارت | المخزن</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if (
+        'serviceWorker' in navigator &&
+        !['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
+      ) {
+        window.addEventListener('load', () => {
+          const scopePath = window.location.pathname.replace(/\/[^/]*$/, '/');
+          navigator.serviceWorker.register(`${scopePath}sw.js?v=2`).catch((error) => {
+            console.warn('Dispatcher service worker registration failed:', error);
+          });
+        });
+      }
+    </script>
+  </body>
+</html>

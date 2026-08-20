@@ -1,0 +1,47 @@
+{
+  "name": "هوريكا سمارت | تطبيق المخزن",
+  "short_name": "المخزن",
+  "description": "تطبيق المخزن لإدارة طلبات التجهيز والمخزون ومسح الباركود",
+  "start_url": "/dispatcher/",
+  "scope": "/dispatcher/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f9fafb",
+  "theme_color": "#065f46",
+  "lang": "ar-EG",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "dispatcher-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "dispatcher-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "الرئيسية",
+      "short_name": "الرئيسية",
+      "url": "/dispatcher/#/dashboard",
+      "icons": [{ "src": "dispatcher-icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "الطلبات",
+      "short_name": "الطلبات",
+      "url": "/dispatcher/#/orders",
+      "icons": [{ "src": "dispatcher-icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "المخزون",
+      "short_name": "المخزون",
+      "url": "/dispatcher/#/inventory",
+      "icons": [{ "src": "dispatcher-icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

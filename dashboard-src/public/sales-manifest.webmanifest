@@ -1,0 +1,87 @@
+{
+  "id": "/sales/",
+  "name": "هوريكا سمارت | تطبيق مندوب المبيعات",
+  "short_name": "المبيعات",
+  "description": "تطبيق عربي لمندوبي مبيعات الجملة لإدارة العملاء، الزيارات، خط السير، ومتابعة الطلبات.",
+  "start_url": "/sales/",
+  "scope": "/sales/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui", "browser"],
+  "orientation": "portrait-primary",
+  "background_color": "#0a0f1e",
+  "theme_color": "#0a0f1e",
+  "categories": ["business", "productivity"],
+  "lang": "ar-EG",
+  "dir": "rtl",
+  "prefer_related_applications": false,
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "icons": [
+    {
+      "src": "/sales/sales-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/sales/sales-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/sales/sales-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/sales/sales-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/sales/sales-dashboard-shot.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "ملخص لوحة مندوب المبيعات"
+    },
+    {
+      "src": "/sales/sales-dashboard-shot.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "label": "الرئيسية في تطبيق المبيعات"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "عملاء التجزئة",
+      "short_name": "العملاء",
+      "url": "/sales/#/customers",
+      "icons": [
+        {
+          "src": "/sales/sales-icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "زيارات المندوب",
+      "short_name": "الزيارات",
+      "url": "/sales/#/visits",
+      "icons": [
+        {
+          "src": "/sales/sales-icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

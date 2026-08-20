@@ -1,0 +1,186 @@
+﻿import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { supabase, withSupabaseLockRetry } from '../../lib/supabase'
+import { useAuthStore } from '../../store/authStore'
+import { IconMail } from '../shared/Icons'
+import { SALES_LOGO_SRC } from '../../lib/appAssets'
+
+function localizeAuthError(message: string): string {
+  const normalized = message.toLowerCase()
+
+  if (normalized.includes('invalid login credentials')) {
+    return 'البريد الإلكتروني أو كلمة المرور غير صحيحة'
+  }
+  if (normalized.includes('email not confirmed')) {
+    return 'يرجى تأكيد البريد الإلكتروني قبل تسجيل الدخول'
+  }
+  if (normalized.includes('too many requests')) {
+    return 'عدد المحاولات كبير، حاول مرة أخرى بعد قليل'
+  }
+
+  return message
+}
+
+export default function AuthPage() {
+  const navigate = useNavigate()
+  const setUser = useAuthStore((state) => state.setUser)
+  const setSession = useAuthStore((state) => state.setSession)
+  const setAuthLoading = useAuthStore((state) => state.setLoading)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  // Check if user is already logged in
+  useEffect(() => {
+    const checkAuth = async () => {
+      const result = await Promise.race([
+        withSupabaseLockRetry(() => supabase.auth.getSession()),
+        new Promise<{ data: { session: null } }>((resolve) =>
+          setTimeout(() => resolve({ data: { session: null } }), 1000)
+        )
+      ])
+
+      if (result.data.session) {
+        navigate('/')
+      }
+    }
+    checkAuth()
+  }, [])
+
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+
+    try {
+      const normalizedEmail = email.trim().toLowerCase()
+
+      const { data: profileCheck, error: profileCheckError } =
+        await supabase.functions.invoke('profiles-auth', {
+          body: { email: normalizedEmail },
+        })
+
+      if (profileCheckError || !profileCheck?.valid) {
+        setError(profileCheck?.error || profileCheckError?.message || 'البريد الإلكتروني غير مسجل')
+        return
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password: password,
+      })
+
+      if (error) {
+        setError(localizeAuthError(error.message || 'البريد الإلكتروني أو كلمة المرور غير صحيحة'))
+        return
+      }
+
+      if (data.session) {
+        setSession(data.session)
+      }
+
+      if (data.user) {
+        setUser({
+          id: data.user.id,
+          email: data.user.email ?? normalizedEmail,
+          full_name: data.user.user_metadata?.full_name ?? normalizedEmail.split('@')[0] ?? 'مستخدم',
+          role: 'sales_team',
+          phone: data.user.phone ?? undefined,
+          avatar_url: data.user.user_metadata?.avatar_url,
+          team_id: undefined,
+          is_active: true,
+          created_at: data.user.created_at ?? new Date().toISOString()
+        })
+      }
+
+      setAuthLoading(false)
+      navigate('/')
+    } catch (err) {
+      setError('حدث خطأ غير متوقع')
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col min-h-[100dvh] bg-brand-950 relative overflow-y-auto">
+      <div className="relative flex-1 flex flex-col items-center justify-center w-full px-6 py-10">
+        <div className="w-full max-w-sm">
+        {/* Logo */}
+        <div className="text-center mb-10">
+          <div className="inline-flex  rounded-2xl  items-center justify-center mb-4">
+            <img src={SALES_LOGO_SRC} alt="هوريكا سمارت" className="w-20 h-20 object-contain" />
+          </div>
+          <h1 className="font-display text-3xl font-cairo text-white"><>
+            <span className="text-white">هوريكا</span>{' '}<span className="text-brand-400">سمارت</span>
+            
+          </>
+</h1>
+          <p className="text-brand-200/80 text-xs mt-3">نظام إدارة فرق المبيعات الميدانية</p>
+        </div>
+
+        {/* Form */}
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+          <form onSubmit={handleLogin} className="space-y-5">
+            <h2 className="text-white text-lg font-bold mb-6">أهلا بك</h2>
+            
+            <div>
+              <label className="text-white/70 text-xs block mb-2">البريد الإلكتروني</label>
+              <div className="relative">
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40">
+                  <IconMail size={16} />
+                </div>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="example@company.com"
+                  autoComplete="username"
+                  required
+                  className="w-full bg-white/5 border border-white/10 rounded-xl pr-10 pl-4 py-3 text-white placeholder-white/40 text-sm focus:outline-none focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/10 transition-all"
+                  dir="ltr"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-white/70 text-xs block mb-2">كلمة المرور</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                autoComplete="current-password"
+                required
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 text-sm focus:outline-none focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/10 transition-all"
+              />
+            </div>
+
+            {error && (
+              <p className="text-red-400 text-xs bg-red-400/10 border border-red-400/20 rounded-xl px-3 py-2">{error}</p>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading || !email || !password}
+              className="w-full py-3.5 rounded-xl bg-gradient-to-r from-brand-500 to-brand-400 text-white font-display font-bold text-sm hover:brightness-110 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full" />
+              ) : (
+                'تسجيل الدخول'
+              )}
+            </button>
+          </form>
+        </div>
+
+        <p className="text-center text-white/50 text-xs mt-6">
+          هوريكا سمارت | تطبيق المبيعات
+        </p>
+        </div>
+      </div>
+    </div>
+  )
+}

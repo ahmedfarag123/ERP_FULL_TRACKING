@@ -1,0 +1,128 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    './index.html',
+    './src/**/*.{js,ts,jsx,tsx}',
+    './sales/**/*.{js,ts,jsx,tsx}',
+    './driver/**/*.{js,ts,jsx,tsx}',
+    './sales_team/**/*.{js,ts,jsx,tsx}',
+    './driver_team/index.html',
+    './driver_team/src/**/*.{js,ts,jsx,tsx}',
+  ],
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        brand: {
+          25: '#f2f7ff',
+          50: '#ecf3ff',
+          100: '#dde9ff',
+          200: '#c2d6ff',
+          300: '#9cb9ff',
+          400: '#7592ff',
+          500: '#465fff',
+          600: '#3641f5',
+          700: '#2a31d8',
+          800: '#252dae',
+          900: '#262e89',
+          950: '#161950',
+        },
+        transit: {
+          50: '#fffbeb',
+          100: '#fef3c7',
+          500: '#f59e0b',
+          700: '#b45309',
+        },
+        border: 'hsl(var(--border))',
+        input: 'hsl(var(--input))',
+        ring: 'hsl(var(--ring))',
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        primary: {
+          DEFAULT: 'hsl(var(--primary))',
+          foreground: 'hsl(var(--primary-foreground))',
+        },
+        secondary: {
+          DEFAULT: 'hsl(var(--secondary))',
+          foreground: 'hsl(var(--secondary-foreground))',
+        },
+        destructive: {
+          DEFAULT: 'hsl(var(--destructive) / <alpha-value>)',
+          foreground: 'hsl(var(--destructive-foreground) / <alpha-value>)',
+        },
+        muted: {
+          DEFAULT: 'hsl(var(--muted))',
+          foreground: 'hsl(var(--muted-foreground))',
+        },
+        accent: {
+          DEFAULT: 'hsl(var(--accent))',
+          foreground: 'hsl(var(--accent-foreground))',
+        },
+        popover: {
+          DEFAULT: 'hsl(var(--popover))',
+          foreground: 'hsl(var(--popover-foreground))',
+        },
+        card: {
+          DEFAULT: 'hsl(var(--card))',
+          foreground: 'hsl(var(--card-foreground))',
+        },
+        'app-dark': '#001c97',
+        'app-light': '#e6efff',
+        'app-accent': '#0057b8',
+        'app-text': '#1a1a1a',
+        'app-text-secondary': '#666666',
+        'app-border': '#e0e0e0',
+        'app-error': '#dc3545',
+        'app-success': '#28a745',
+        'app-warning': '#f0ad4e',
+        gray: {
+          50: '#f9fafb',
+          100: '#f3f4f6',
+          200: '#e5e7eb',
+          300: '#d1d5db',
+          400: '#9ca3af',
+          500: '#6b7280',
+          600: '#4b5563',
+          700: '#374151',
+          800: '#1f2937',
+          900: '#111827',
+        },
+      },
+      borderRadius: {
+        xl: 'calc(var(--radius) + 4px)',
+        lg: 'var(--radius)',
+        md: 'calc(var(--radius) - 2px)',
+        sm: 'calc(var(--radius) - 4px)',
+        xs: 'calc(var(--radius) - 6px)',
+      },
+      fontFamily: {
+        sans: ['system-ui', 'sans-serif'],
+      },
+      boxShadow: {
+        DEFAULT: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+        sm: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+        md: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+        lg: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+        xl: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+        card: '0 2px 8px rgba(0,0,0,0.08)',
+        elevated: '0 4px 16px rgba(0,0,0,0.12)',
+        nav: '0 -2px 8px rgba(0,0,0,0.06)',
+      },
+      keyframes: {
+        shake: {
+          '0%, 100%': { transform: 'translateX(0)' },
+          '10%, 30%, 50%, 70%, 90%': { transform: 'translateX(-5px)' },
+          '20%, 40%, 60%, 80%': { transform: 'translateX(5px)' },
+        },
+      },
+      animation: {
+        shake: 'shake 0.4s ease-in-out',
+      },
+      spacing: {
+        '4.5': '1.125rem',
+        '7.5': '1.875rem',
+      },
+    },
+  },
+  plugins: [],
+}

@@ -1,0 +1,66 @@
+export interface LogisticsShipmentRecord {
+  id: string;
+  plan_id: string | null;
+  external_shipment_id: string | null;
+  shipment_reference: string | null;
+  origin_ref: string | null;
+  external_order_id: string | null;
+  odoo_order_name: string | null;
+  linked_order_id: string | null;
+  customer_id: string | null;
+  external_customer_id: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  customer_latitude: number | string | null;
+  customer_longitude: number | string | null;
+  warehouse_id: string | null;
+  external_warehouse_id: string | null;
+  warehouse_name: string | null;
+  warehouse_latitude: number | string | null;
+  warehouse_longitude: number | string | null;
+  estimated_road_distance_km: number | string | null;
+  logistics_user_id: string | null;
+  assigned_profile_id: string | null;
+  external_user_id: string | null;
+  assigned_user_name: string | null;
+  assigned_job_title: string | null;
+  operation_type_name: string | null;
+  operation_type_ref: string | null;
+  source_location_ref: string | null;
+  destination_location_ref: string | null;
+  shipment_state: string | null;
+  shipment_status: string | null;
+  delivery_phase: string | null;
+  route_sequence: number | string | null;
+  route_locked: boolean | null;
+  priority: string | null;
+  move_type: string | null;
+  scheduled_at: string | null;
+  completed_at: string | null;
+  odoo_created_at: string | null;
+  odoo_updated_at: string | null;
+  total_weight: number | string | null;
+  notes: string | null;
+  last_sync_at: string | null;
+}
+
+export interface LogisticsShipmentItemRecord {
+  id: string;
+  shipment_id: string;
+  external_move_id: string | null;
+  product_id: string | null;
+  external_product_id: string | null;
+  product_name: string | null;
+  product_ref: string | null;
+  requested_quantity: number | string | null;
+  done_quantity: number | string | null;
+  reserved_quantity: number | string | null;
+  forecast_quantity: number | string | null;
+  move_state: string | null;
+  source_location_ref: string | null;
+  destination_location_ref: string | null;
+  last_sync_at: string | null;
+  preparation_status?: 'pending' | 'ready' | 'partial' | 'unavailable' | null;
+  approved_quantity?: number | null;
+  shortage_reason?: string | null;
+}

@@ -1,0 +1,110 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 150 30% 96%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 161 94% 30%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 158 64% 95%;
+    --secondary-foreground: 163 94% 24%;
+    --muted: 150 25% 94%;
+    --muted-foreground: 220 17% 46%;
+    --accent: 161 94% 30%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 4 86% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 155 18% 90%;
+    --input: 155 18% 90%;
+    --ring: 161 94% 30%;
+    --radius: 0.75rem;
+
+    /* Custom app colors */
+    --app-primary-dark: #059669;
+    --app-primary-light: #ecfdf5;
+    --app-accent: #059669;
+    --app-white: #ffffff;
+    --app-text-dark: #101828;
+    --app-text-secondary: #667085;
+    --app-border: #e4e7ec;
+    --app-border-focus: #059669;
+    --app-error: #f04438;
+    --app-success: #12b76a;
+    --app-warning: #f79009;
+    --app-info: #0ba5ec;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  img,
+  video,
+  svg,
+  canvas,
+  iframe {
+    max-width: 100%;
+  }
+
+  body {
+    background-color: #f2f8f5;
+    background-image:
+      radial-gradient(
+        60rem 34rem at 100% -8%,
+        rgb(16 185 129 / 0.08),
+        transparent 60%
+      ),
+      radial-gradient(
+        52rem 30rem at -4% 108%,
+        rgb(20 184 166 / 0.07),
+        transparent 60%
+      );
+    background-attachment: fixed;
+    color: hsl(var(--foreground));
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-family: 'IBM Plex Sans Arabic', Tahoma, Arial, sans-serif;
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+}
+
+@layer components {
+  .mobile-app-frame > .min-h-screen {
+    min-height: 0;
+    flex: 1 1 auto;
+    height: auto;
+  }
+
+  .mobile-app-frame .overflow-y-auto {
+    min-height: 0;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

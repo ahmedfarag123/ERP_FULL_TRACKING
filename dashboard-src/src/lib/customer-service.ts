@@ -37,6 +37,7 @@ export interface TicketWithDetails extends OrderTicket {
   order_customer_name: string | null;
   order_amount: number | null;
   order_delivery_status: string | null;
+  order_commitment_date: string | null;
   creator_name: string | null;
   assignee_name: string | null;
   comment_count: number;
@@ -126,7 +127,7 @@ export async function fetchTickets(filters?: {
     .select(
       `
       *,
-      order:orders(id, odoo_order_name, external_order_id, customer_name, total_amount, delivery_status),
+      order:orders(id, odoo_order_name, external_order_id, customer_name, total_amount, delivery_status, commitment_date),
       creator:profiles!order_tickets_created_by_fkey(full_name),
       assignee:profiles!order_tickets_assigned_to_fkey(full_name),
       comments:order_ticket_comments(count)
@@ -176,6 +177,7 @@ export async function fetchTickets(filters?: {
       order_customer_name: (order?.customer_name as string) || null,
       order_amount: (order?.total_amount as number) ?? null,
       order_delivery_status: (order?.delivery_status as string) || null,
+      order_commitment_date: (order?.commitment_date as string) || null,
       creator_name: (creator?.full_name as string) || null,
       assignee_name: (assignee?.full_name as string) || null,
       comment_count: comments?.[0]?.count ?? 0,
@@ -253,6 +255,7 @@ export async function createTicket(input: {
   category?: string;
   assignedTo?: string | null;
   createdBy: string;
+  dueDate?: string | null;
 }) {
   const { data, error } = await supabase
     .from("order_tickets")
@@ -266,6 +269,7 @@ export async function createTicket(input: {
       assigned_to: input.assignedTo ?? null,
       created_by: input.createdBy,
       status: "open",
+      raw_payload: input.dueDate ? { due_date: input.dueDate } : null,
     })
     .select("*")
     .single();

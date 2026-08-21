@@ -71,6 +71,7 @@ export default function CreateTicketModal({
   const [category, setCategory] = useState("");
   const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [dueDate, setDueDate] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -112,6 +113,7 @@ export default function CreateTicketModal({
     setCategory("");
     setSelectedDepartments([]);
     setSelectedUserIds([]);
+    setDueDate("");
     setError(null);
   }, [isOpen]);
 
@@ -136,6 +138,7 @@ export default function CreateTicketModal({
         category: category || undefined,
         assignedTo: null,
         createdBy: currentUserId,
+        dueDate: dueDate || null,
       });
       onCreated();
     } catch (saveError) {
@@ -268,6 +271,18 @@ export default function CreateTicketModal({
                   </option>
                 ))}
               </select>
+            </AdminField>
+          </div>
+
+          <div className="md:col-span-2">
+            <AdminField label="تاريخ الاستحقاق (اختياري)">
+              <input
+                type="date"
+                value={dueDate}
+                onChange={(event) => setDueDate(event.target.value)}
+                className={INPUT_CLASS}
+                dir="ltr"
+              />
             </AdminField>
           </div>
         </div>

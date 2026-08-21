@@ -390,7 +390,7 @@ export default function CustomerServicePage() {
                       <th className="px-4 py-4 text-right">التعليقات</th>
                       <th className="px-4 py-4 text-right">أنشأها</th>
                       <th className="px-4 py-4 text-right">أنشئ في</th>
-                      <th className="px-4 py-4 text-right">التاريخ</th>
+                      <th className="px-4 py-4 text-right">تاريخ الاستحقاق</th>
                       <th className="w-16 px-4 py-4 text-center">الإجراء</th>
                     </tr>
                   </thead>
@@ -471,6 +471,12 @@ export default function CustomerServicePage() {
                                 const dueDate = rp?.due_date;
                                 if (dueDate && typeof dueDate === "string") {
                                   const d = new Date(dueDate);
+                                  if (!Number.isNaN(d.getTime())) {
+                                    return d.toLocaleDateString("ar-EG", { year: "numeric", month: "short", day: "numeric" });
+                                  }
+                                }
+                                if (ticket.order_commitment_date) {
+                                  const d = new Date(ticket.order_commitment_date);
                                   if (!Number.isNaN(d.getTime())) {
                                     return d.toLocaleDateString("ar-EG", { year: "numeric", month: "short", day: "numeric" });
                                   }

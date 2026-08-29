@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import {
+  ArrowDownTrayIcon,
   ChatBubbleLeftRightIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -13,6 +14,7 @@ import {
   MagnifyingGlassIcon,
   PlusIcon,
   TicketIcon,
+  TrashIcon,
 } from "@heroicons/react/24/outline";
 import PageMeta from "../../components/common/PageMeta";
 import { AdminPageFrame } from "../../components/admin/AdminPageElements";
@@ -26,6 +28,8 @@ import { useUrlIntParam, useUrlStringParam } from "../../hooks/useUrlState";
 import {
   fetchTickets,
   fetchTicketStats,
+  fetchTicketsForExport,
+  deleteTicket,
   resolveStatusTone,
   resolvePriorityTone,
   formatOptionLabel,
@@ -38,6 +42,7 @@ import {
 } from "../../lib/customer-service";
 import { supabase } from "../../lib/supabase";
 import { getCached, setCache } from "../../lib/offlineCache";
+import * as XLSX from "xlsx-js-style";
 
 type StatusFilter = TicketStatus | "all";
 type PriorityFilter = TicketPriority | "all";
@@ -67,6 +72,8 @@ function formatDateTime(iso: string | null) {
   });
 }
 
+const TICKET_DELETE_ALLOWED_EMAILS = new Set(["ahmed-farag@hs.com", "hadeer@hs.com"]);
+
 export default function CustomerServicePage() {
   const navigate = useNavigate();
   const { profile } = useAuth();
@@ -82,6 +89,7 @@ export default function CustomerServicePage() {
   const [searchTerm, setSearchTerm] = useUrlStringParam("q");
   const [currentPage, setCurrentPage] = useUrlIntParam("page", 1);
   const didMountFiltersRef = useRef(false);
+  const prevFiltersRef = useRef({ statusFilter, priorityFilter, searchTerm });
 
   const [stats, setStats] = useState({
     total: 0,
@@ -214,16 +222,147 @@ export default function CustomerServicePage() {
       return;
     }
 
-    if (currentPage !== 1) {
+    const prev = prevFiltersRef.current;
+    const filtersChanged =
+      prev.statusFilter !== statusFilter ||
+      prev.priorityFilter !== priorityFilter ||
+      prev.searchTerm !== searchTerm;
+    prevFiltersRef.current = { statusFilter, priorityFilter, searchTerm };
+
+    if (filtersChanged && currentPage !== 1) {
       setCurrentPage(1);
     }
-  }, [currentPage, priorityFilter, searchTerm, setCurrentPage, statusFilter]);
+  }, [priorityFilter, searchTerm, setCurrentPage, statusFilter]);
 
   const handleCreated = useCallback(() => {
     setIsCreateModalOpen(false);
     void loadTickets();
     void loadStats();
   }, [loadTickets, loadStats]);
+
+  const canDeleteTickets =
+    profile?.email === "ahmed-farag@hs.com" || profile?.email === "hadeer@hs.com";
+
+  const handleDeleteTicket = useCallback(
+    async (event: React.MouseEvent, ticketId: string, ticketSubject: string) => {
+      event.stopPropagation();
+      if (!window.confirm(`هل أنت متأكد من حذف التذكرة "${ticketSubject}"؟ لا يمكن التراجع عن هذا الإجراء.`)) {
+        return;
+      }
+      try {
+        await deleteTicket(ticketId);
+        await loadTickets();
+        await loadStats();
+      } catch {
+        alert("فشل حذف التذكرة. حاول مرة أخرى.");
+      }
+    },
+    [loadTickets, loadStats],
+  );
+
+  const handleExportExcel = useCallback(async () => {
+    try {
+      const rows = await fetchTicketsForExport({
+        status: statusFilter,
+        priority: priorityFilter,
+        searchTerm,
+      });
+      if (rows.length === 0) {
+        alert("لا توجد تذاكر للتصدير.");
+        return;
+      }
+
+      const exportData = rows.map((t) => {
+        const rp = (t as unknown as { rp: Record<string, unknown> }).rp ?? {};
+        const str = (v: unknown): string => (typeof v === "string" ? v : "");
+        const dateStr = (v: unknown): string => {
+          if (typeof v !== "string" || !v) return "";
+          const d = new Date(v);
+          if (Number.isNaN(d.getTime())) return "";
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+        };
+        return {
+          "Timestamp": dateStr(rp.original_timestamp ?? t.created_at),
+          "Email address": (t as unknown as { creator_email: string | null }).creator_email ?? "",
+          "Score": "",
+          "التاريخ": dateStr(rp.date ?? rp.original_timestamp),
+          "هل واجهتنا مشكله مع العميل اثناء التسليم ": str(rp.delivery_issue),
+          "عرض السعر ": (t as unknown as { order_number: string | null }).order_number ?? "",
+          "اسم العميل ": (t as unknown as { order_customer_name: string | null }).order_customer_name ?? str(rp.customer_name),
+          "selas person": str(rp.sales_person ?? rp.salesperson),
+          "مندوب التوصيل": str(rp.dispatcher),
+          "أنشئ بواسطة ": (t as unknown as { creator_name: string | null }).creator_name ?? str(rp.created_by_name),
+          "حالة الفاتورة -(المنتجات كامله قبل الخروج , ناقصه) ": str(rp.invoice_status ?? rp.invoice_state),
+          "التوصيل ": str(rp.delivery),
+          "حالة التسليم - (تم بالكامل,ارجاع كلي,ارجاع جزئي ) ": str(rp.delivery_result),
+          " عنوان المشكله ": str(rp.problem_title ?? t.subject),
+          "  تفاصيل المشكلة ": str(rp.problem_detail ?? t.description),
+          "القسم المسؤول": t.category || "غير محدد",
+          "مدى رضا العميل عن الطلب ": str(rp.customer_satisfaction ?? rp.satisfaction),
+          "هل تم حل المشكلة  ان وجد ": str(rp.problem_resolved),
+          "الخسائر ": str(rp.damages ?? rp.losses),
+          "هل تم التاكيد من النتيجه ": str(rp.result_confirmed),
+          "البيانات -(العنوان ورقم الفون صح, خطأ ) ": str(rp.data_correct),
+          "وسيلة التواصل ": str(rp.contact_method),
+          "2  تفاصيل المشكلة ": str(rp.problem_detail2),
+          "ملاحظات": str(rp.notes),
+          "وضح السبب عدم وضوح البيانات": str(rp.phone_issue),
+          "الشركة": str(rp.company),
+          "Column 25": "",
+          "الشركة 2": "",
+          "التيلفون غير صحيح السبب": str(rp.phone_issue),
+          "ملاحظات هدير": "",
+          "Column 1": "",
+          "Column 32": "",
+          "Column 33": "",
+        };
+      });
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      ws["!cols"] = [
+        { wch: 22 }, { wch: 25 }, { wch: 8 }, { wch: 12 }, { wch: 16 },
+        { wch: 14 }, { wch: 22 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
+        { wch: 24 }, { wch: 16 }, { wch: 24 }, { wch: 28 }, { wch: 35 },
+        { wch: 18 }, { wch: 20 }, { wch: 20 }, { wch: 22 }, { wch: 18 },
+        { wch: 20 }, { wch: 16 }, { wch: 28 }, { wch: 30 }, { wch: 28 },
+        { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 24 }, { wch: 20 },
+        { wch: 12 }, { wch: 12 }, { wch: 12 },
+      ];
+
+      // Style header row to match Google Forms design
+      const headerStyle = {
+        font: { name: "Arial", bold: true, color: { rgb: "FFFFFF" } },
+        fill: { fgColor: { rgb: "000000" } },
+        alignment: { horizontal: "center" as const, vertical: "center" as const, wrapText: true },
+        border: { bottom: { style: "thin" as const, color: { rgb: "000000" } } },
+      };
+      const dataStyle = {
+        font: { name: "Arial", size: 11 },
+        alignment: { vertical: "center" as const, wrapText: true },
+      };
+
+      const range = XLSX.utils.decode_range(ws["!ref"] ?? "A1");
+      // Style header row (row 0)
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r: 0, c });
+        ws[addr].s = { ...headerStyle };
+      }
+      // Style data rows
+      for (let r = 1; r <= range.e.r; r++) {
+        for (let c = range.s.c; c <= range.e.c; c++) {
+          const addr = XLSX.utils.encode_cell({ r, c });
+          if (ws[addr]) ws[addr].s = { ...dataStyle };
+        }
+      }
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Form responses 1");
+      const dateStr = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `CUSTOMER SERVICE Tickets ${dateStr}.xlsx`);
+    } catch {
+      alert("فشل تصدير الملف. حاول مرة أخرى.");
+    }
+  }, [statusFilter, priorityFilter, searchTerm]);
 
   return (
     <>
@@ -357,6 +496,14 @@ export default function CustomerServicePage() {
                   <PlusIcon className="h-4 w-4" aria-hidden />
                   تذكرة جديدة
                 </button>
+                <button
+                  type="button"
+                  onClick={handleExportExcel}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06]"
+                >
+                  <ArrowDownTrayIcon className="h-4 w-4" aria-hidden />
+                  تحميل إكسل
+                </button>
               </div>
             </div>
           </div>
@@ -429,14 +576,20 @@ export default function CustomerServicePage() {
                             ) : null}
                           </td>
                           <td className="px-4 py-4 text-right align-middle">
-                            <Link
-                              to={`/orders/${ticket.order_id}`}
-                              onClick={(event) => event.stopPropagation()}
-                              className="font-semibold text-gray-900 hover:text-blue-600 dark:text-white"
-                              dir="ltr"
-                            >
-                              {ticket.order_number || ticket.order_id.slice(0, 8)}
-                            </Link>
+                            {ticket.order_id ? (
+                              <Link
+                                to={`/orders/${ticket.order_id}`}
+                                onClick={(event) => event.stopPropagation()}
+                                className="font-semibold text-gray-900 hover:text-blue-600 dark:text-white"
+                                dir="ltr"
+                              >
+                                {ticket.order_number || ticket.order_id.slice(0, 8)}
+                              </Link>
+                            ) : (
+                              <span className="font-semibold text-gray-500 dark:text-gray-400" dir="ltr">
+                                {String((ticket.raw_payload as Record<string, unknown>)?.order_reference ?? "--")}
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-4 text-right align-middle">
                             <p className="text-sm text-gray-700 dark:text-gray-300" dir="auto">
@@ -468,7 +621,7 @@ export default function CustomerServicePage() {
                             <p className="text-sm text-gray-500 dark:text-gray-400">
                               {(() => {
                                 const rp = ticket.raw_payload as Record<string, unknown> | null;
-                                const dueDate = rp?.due_date;
+                                const dueDate = rp?.due_date_excel ?? rp?.due_date;
                                 if (dueDate && typeof dueDate === "string") {
                                   const d = new Date(dueDate);
                                   if (!Number.isNaN(d.getTime())) {
@@ -486,17 +639,29 @@ export default function CustomerServicePage() {
                             </p>
                           </td>
                           <td className="px-4 py-4 text-center align-middle">
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                navigate(`/tickets/${ticket.id}`);
-                              }}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-transparent text-gray-500 transition hover:border-gray-200 hover:bg-brand-25 hover:text-gray-700 dark:hover:border-gray-700 dark:hover:bg-white/[0.02] dark:hover:text-gray-300"
-                              aria-label="فتح التذكرة"
-                            >
-                              <ChevronLeftIcon className="h-5 w-5" aria-hidden />
-                            </button>
+                            <div className="inline-flex items-center gap-1">
+                              {canDeleteTickets ? (
+                                <button
+                                  type="button"
+                                  onClick={(event) => handleDeleteTicket(event, ticket.id, ticket.subject)}
+                                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-transparent text-red-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:hover:border-red-500/20 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                                  aria-label="حذف التذكرة"
+                                >
+                                  <TrashIcon className="h-4 w-4" aria-hidden />
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  navigate(`/tickets/${ticket.id}`);
+                                }}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-transparent text-gray-500 transition hover:border-gray-200 hover:bg-brand-25 hover:text-gray-700 dark:hover:border-gray-700 dark:hover:bg-white/[0.02] dark:hover:text-gray-300"
+                                aria-label="فتح التذكرة"
+                              >
+                                <ChevronLeftIcon className="h-5 w-5" aria-hidden />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -529,24 +694,32 @@ export default function CustomerServicePage() {
                   >
                     <ChevronLeftIcon className="h-4 w-4" aria-hidden />
                   </button>
-                  {Array.from({ length: Math.min(totalPages, 5) }).map((_, index) => {
-                    const pageNumber = index + 1;
-                    const active = pageNumber === safeCurrentPage;
-                    return (
-                      <button
-                        key={pageNumber}
-                        type="button"
-                        onClick={() => setCurrentPage(pageNumber)}
-                        className={`inline-flex h-9 min-w-9 items-center justify-center rounded-xl px-3 text-sm font-semibold transition ${
-                          active
-                            ? "bg-blue-600 text-white"
-                            : "text-gray-700 hover:bg-brand-25 dark:text-gray-200 dark:hover:bg-white/[0.02]"
-                        }`}
-                      >
-                        {pageNumber}
-                      </button>
-                    );
-                  })}
+                  {(() => {
+                    const maxVisible = 5;
+                    let startPage = Math.max(1, safeCurrentPage - Math.floor(maxVisible / 2));
+                    const endPage = Math.min(totalPages, startPage + maxVisible - 1);
+                    if (endPage - startPage + 1 < maxVisible) {
+                      startPage = Math.max(1, endPage - maxVisible + 1);
+                    }
+                    return Array.from({ length: endPage - startPage + 1 }).map((_, index) => {
+                      const pageNumber = startPage + index;
+                      const active = pageNumber === safeCurrentPage;
+                      return (
+                        <button
+                          key={pageNumber}
+                          type="button"
+                          onClick={() => setCurrentPage(pageNumber)}
+                          className={`inline-flex h-9 min-w-9 items-center justify-center rounded-xl px-3 text-sm font-semibold transition ${
+                            active
+                              ? "bg-blue-600 text-white"
+                              : "text-gray-700 hover:bg-brand-25 dark:text-gray-200 dark:hover:bg-white/[0.02]"
+                          }`}
+                        >
+                          {pageNumber}
+                        </button>
+                      );
+                    });
+                  })()}
                   <button
                     type="button"
                     onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}

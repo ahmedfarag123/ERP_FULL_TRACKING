@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, User, Package, CheckCircle, ShoppingCart, ChevronDown, ChevronUp, Truck, Calendar, Loader2 } from 'lucide-react';
 import { usePlanStore } from '../stores/planStore';
@@ -42,6 +42,10 @@ export default function PlanDetailScreen() {
   const [shortageNote, setShortageNote] = useState('');
   const [savingItemId, setSavingItemId] = useState<string | null>(null);
   const [showOrders, setShowOrders] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const [isCompleting, setIsCompleting] = useState(false);
+
+  const navigate = useNavigate();
 
   const plan = plans.find((p) => p.plan_id === id);
   const isSavingItem = savingItemId !== null;
@@ -79,11 +83,15 @@ export default function PlanDetailScreen() {
   const showProducts = plan.preparation_status !== 'pending' && plan.preparation_status !== 'cancelled';
 
   const handleStartPreparation = async () => {
+    if (isStarting) return;
+    setIsStarting(true);
     try {
       await startPlanPreparation(plan.plan_id);
       showToast('بدأ تجهيز الخطة', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'فشل بدء التجهيز', 'error');
+    } finally {
+      setIsStarting(false);
     }
   };
 
@@ -161,11 +169,16 @@ export default function PlanDetailScreen() {
   };
 
   const handleComplete = async () => {
+    if (isCompleting) return;
+    setIsCompleting(true);
     try {
       await completePlanPreparation(plan.plan_id);
-      showToast('تم إكمال تجهيز الخطة', 'success');
+      showToast('تم إكمال تجهيز الخطة بنجاح', 'success');
+      navigate('/plans');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'فشل إكمال التجهيز', 'error');
+    } finally {
+      setIsCompleting(false);
     }
   };
 
@@ -319,15 +332,15 @@ export default function PlanDetailScreen() {
         {plan.preparation_status !== 'ready' && (plan.preparation_status === 'pending' || plan.preparation_status === 'cancelled' || canComplete) && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="mx-4 mt-4">
             {(plan.preparation_status === 'pending' || plan.preparation_status === 'cancelled') ? (
-              <button onClick={handleStartPreparation} className="w-full h-[52px] bg-app-dark text-white rounded-xl font-semibold flex items-center justify-center gap-2 active:scale-[0.96] transition-transform">
-                <Package size={20} />
+              <button disabled={isStarting} onClick={handleStartPreparation} className="w-full h-[52px] bg-app-dark text-white rounded-xl font-semibold flex items-center justify-center gap-2 active:scale-[0.96] transition-transform disabled:opacity-70">
+                {isStarting ? <Loader2 size={20} className="animate-spin" /> : <Package size={20} />}
                 {plan.preparation_status === 'cancelled' ? 'إعادة التجهيز' : 'استلام الخطة'}
               </button>
             ) : null}
             {canComplete && (
-              <button onClick={handleComplete} className="w-full h-[52px] bg-app-success text-white rounded-xl font-semibold flex items-center justify-center gap-2 active:scale-[0.96] transition-transform mt-3">
-                <CheckCircle size={20} />
-                إكمال التجهيز
+              <button disabled={isCompleting} onClick={handleComplete} className="w-full h-[52px] bg-app-success text-white rounded-xl font-semibold flex items-center justify-center gap-2 active:scale-[0.96] transition-transform mt-3 disabled:opacity-70">
+                {isCompleting ? <Loader2 size={20} className="animate-spin" /> : <CheckCircle size={20} />}
+                {isCompleting ? 'جاري الإكمال...' : 'إكمال التجهيز'}
               </button>
             )}
           </motion.div>

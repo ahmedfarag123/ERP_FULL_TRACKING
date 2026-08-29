@@ -91,8 +91,11 @@ const navItems: NavItem[] = [
   {
     name: "خدمة العملاء",
     icon: <ListIcon />,
-    path: "/tickets",
     requiredPermissions: ["tickets.view", "tickets.manage"],
+    subItems: [
+      { name: "التذاكر", path: "/tickets", requiredPermissions: ["tickets.view"] },
+      { name: "التحليلات", path: "/tickets/analytics", requiredPermissions: ["tickets.view"] },
+    ],
   },
   {
     name: "اللوجستيات",

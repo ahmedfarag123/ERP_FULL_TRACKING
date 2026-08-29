@@ -18,6 +18,7 @@ import { useAuth } from "../../context/AuthContext";
 import {
   fetchTicketById,
   fetchTicketComments,
+  fetchTicketItems,
   addTicketComment,
   updateTicketStatus,
   assignTicket,
@@ -29,6 +30,7 @@ import {
   TICKET_CATEGORY_OPTIONS,
   type TicketStatus,
   type TicketPriority,
+  type TicketItem,
 } from "../../lib/customer-service";
 import { supabase } from "../../lib/supabase";
 
@@ -40,7 +42,10 @@ interface TicketDetailRecord {
   status: TicketStatus;
   priority: string;
   category: string | null;
+  scope: string | null;
   assigned_to: string | null;
+  assigned_departments: string[] | null;
+  assigned_user_ids: string[] | null;
   created_by: string;
   resolved_at: string | null;
   closed_at: string | null;
@@ -127,7 +132,7 @@ function CommentBubble({
 }) {
   return (
     <div className={`flex gap-3 ${isOwnComment ? "flex-row-reverse" : ""}`}>
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-25 dark:bg-white/[0.02]">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
         {comment.author?.avatar_url ? (
           <img
             src={comment.author.avatar_url}
@@ -156,7 +161,7 @@ function CommentBubble({
               ? "bg-blue-600 text-white rounded-tr-sm"
               : comment.is_internal
                 ? "bg-amber-50 text-gray-800 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-100 dark:border-amber-500/30 rounded-tl-sm"
-                : "bg-brand-25 text-gray-800 dark:bg-white/[0.02] dark:text-gray-200 rounded-tl-sm"
+                : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200 rounded-tl-sm"
           }`}
         >
           <p className="whitespace-pre-wrap break-words" dir="auto">
@@ -185,6 +190,7 @@ export default function TicketDetailPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [users, setUsers] = useState<{ id: string; full_name: string }[]>([]);
+  const [ticketItems, setTicketItems] = useState<TicketItem[]>([]);
   const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
   const [orderActivity, setOrderActivity] = useState<Array<{
     id: string;
@@ -200,12 +206,14 @@ export default function TicketDetailPage() {
     try {
       setIsLoading(true);
       setError(null);
-      const [ticketData, commentsData] = await Promise.all([
+      const [ticketData, commentsData, itemsData] = await Promise.all([
         fetchTicketById(ticketId),
         fetchTicketComments(ticketId),
+        fetchTicketItems(ticketId).catch(() => []),
       ]);
       setTicket(ticketData as unknown as TicketDetailRecord);
       setComments(commentsData as unknown as CommentItem[]);
+      setTicketItems(itemsData as TicketItem[]);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "فشل في تحميل التذكرة.");
       setTicket(null);
@@ -354,8 +362,8 @@ export default function TicketDetailPage() {
         <PageMeta title="تفاصيل التذكرة" description="جاري تحميل التذكرة" />
         <AdminPageFrame>
           <div className="space-y-5">
-            <div className="h-32 animate-pulse rounded-[22px] bg-brand-25 dark:bg-white/[0.02]" />
-            <div className="h-[500px] animate-pulse rounded-[22px] bg-brand-25 dark:bg-white/[0.02]" />
+            <div className="h-32 animate-pulse rounded-[22px] bg-gray-100 dark:bg-gray-800" />
+            <div className="h-[500px] animate-pulse rounded-[22px] bg-gray-100 dark:bg-gray-800" />
           </div>
         </AdminPageFrame>
       </>
@@ -373,7 +381,7 @@ export default function TicketDetailPage() {
             action={
               <Link
                 to="/tickets"
-                className="inline-flex items-center rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-brand-25 dark:border-gray-700 dark:text-gray-300"
+                className="inline-flex items-center rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300"
               >
                 العودة للتذاكر
               </Link>
@@ -460,7 +468,7 @@ export default function TicketDetailPage() {
             </div>
 
             {ticket.description ? (
-              <div className="mt-4 rounded-2xl border border-gray-200 bg-brand-25/60 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
+              <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">الوصف</p>
                 <p className="mt-2 text-sm leading-6 text-gray-700 dark:text-gray-300 whitespace-pre-wrap" dir="auto">
                   {ticket.description}
@@ -469,6 +477,58 @@ export default function TicketDetailPage() {
             ) : null}
           </div>
         </section>
+
+        {/* Ticket Items (product-level) */}
+        {ticket.scope === "products" && ticketItems.length > 0 && (
+          <section className="overflow-hidden rounded-[22px] border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+            <div className="border-b border-gray-200 px-5 py-5 dark:border-gray-800">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                المنتجات المتأثرة ({ticketItems.length})
+              </h2>
+            </div>
+            <div className="divide-y divide-gray-100 dark:divide-gray-800">
+              {ticketItems.map((item) => {
+                const itemPriority = resolvePriorityTone(item.priority);
+                const itemCategory = formatOptionLabel(TICKET_CATEGORY_OPTIONS, item.category);
+                return (
+                  <div key={item.id} className="px-5 py-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{item.product_name}</h3>
+                          {item.product_code && (
+                            <span className="text-xs text-gray-400">({item.product_code})</span>
+                          )}
+                          <StatusBadge label={itemPriority.label} tone={itemPriority.tone} />
+                          {itemCategory && (
+                            <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                              {itemCategory}
+                            </span>
+                          )}
+                        </div>
+                        {item.description && (
+                          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap" dir="auto">
+                            {item.description}
+                          </p>
+                        )}
+                        {item.assigned_departments.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {item.assigned_departments.map((d) => (
+                              <span key={d} className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
+                                {d}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <StatusBadge label={resolveStatusTone(item.status).label} tone={resolveStatusTone(item.status).tone} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           {/* Comment Thread */}
@@ -575,7 +635,7 @@ export default function TicketDetailPage() {
                               key={opt.value}
                               type="button"
                               onClick={() => void handleStatusChange(opt.value)}
-                              className={`flex w-full items-center px-4 py-2.5 text-sm transition hover:bg-brand-25 dark:hover:bg-white/[0.02] ${
+                              className={`flex w-full items-center px-4 py-2.5 text-sm transition hover:bg-gray-50 dark:hover:bg-gray-800 ${
                                 ticket.status === opt.value ? "bg-blue-50 dark:bg-blue-500/10" : ""
                               }`}
                             >

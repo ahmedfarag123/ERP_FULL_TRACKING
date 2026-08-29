@@ -34,6 +34,7 @@ const VisitsPage = lazy(() => import("./pages/Admin/VisitsPage"));
 const VisitDetailPage = lazy(() => import("./pages/Admin/VisitDetailPage"));
 const CustomerServicePage = lazy(() => import("./pages/Admin/CustomerServicePage"));
 const TicketDetailPage = lazy(() => import("./pages/Admin/TicketDetailPage"));
+const CustomerServiceAnalytics = lazy(() => import("./pages/Admin/CustomerServiceAnalytics"));
 const LogisticsOverviewPage = lazy(() =>
   import("./pages/Admin/Logistics/LogisticsPages").then((module) => ({
     default: module.LogisticsOverviewPage,
@@ -146,6 +147,7 @@ export default function App() {
               </Route>
               <Route element={<PermissionRoute anyOf={["tickets.view", "tickets.manage"]} />}>
                 <Route path="/tickets" element={<CustomerServicePage />} />
+                <Route path="/tickets/analytics" element={<CustomerServiceAnalytics />} />
                 <Route path="/tickets/:ticketId" element={<TicketDetailPage />} />
               </Route>
               <Route element={<PermissionRoute anyOf={["logistics.view", "logistics.manage"]} />}>

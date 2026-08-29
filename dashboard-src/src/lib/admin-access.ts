@@ -1,5 +1,8 @@
 import type { AdminManagedRole } from "./admin-users";
 
+// Emails allowed to manage all users (Super Admins)
+export const SUPER_ADMIN_EMAILS = ["ahmed-farag@hs.com", "sameh@hs.com"];
+
 export type AdminModuleKey =
   | "dashboard"
   | "orders"

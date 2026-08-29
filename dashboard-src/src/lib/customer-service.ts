@@ -41,6 +41,38 @@ export interface TicketWithDetails extends OrderTicket {
   creator_name: string | null;
   assignee_name: string | null;
   comment_count: number;
+  scope?: TicketScope;
+  assigned_departments?: string[];
+  assigned_user_ids?: string[];
+}
+
+export type TicketScope = "order" | "products";
+
+export interface TicketItem {
+  id: string;
+  ticket_id: string;
+  order_line_item_id: string | null;
+  product_name: string;
+  product_code: string | null;
+  category: string | null;
+  priority: TicketPriority;
+  description: string | null;
+  due_date: string | null;
+  assigned_departments: string[];
+  assigned_user_ids: string[];
+  status: TicketStatus;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrderLineItemOption {
+  id: string;
+  product_name: string;
+  product_code: string | null;
+  ordered_quantity: number;
+  unit_price: number;
+  total_amount: number;
 }
 
 // ─── Options ─────────────────────────────────────────────────────────────────
@@ -116,6 +148,7 @@ export async function fetchTickets(filters?: {
   priority?: TicketPriority | "all";
   assignedTo?: string;
   search?: string;
+  searchTerm?: string;
   limit?: number;
   offset?: number;
 }) {
@@ -145,20 +178,19 @@ export async function fetchTickets(filters?: {
   if (filters?.assignedTo) {
     query = query.eq("assigned_to", filters.assignedTo);
   }
-  if (filters?.search) {
-    const term = filters.search.trim().toLowerCase();
-    const conditions = [`subject.ilike.%${term}%`, `description.ilike.%${term}%`];
-    // Also search by order number: find matching order IDs first
-    const { data: matchedOrders } = await supabase
-      .from("orders")
-      .select("id")
-      .or(`odoo_order_name.ilike.%${term}%,external_order_id.ilike.%${term}%,customer_name.ilike.%${term}%`)
-      .limit(500);
-    const matchedOrderIds = (matchedOrders ?? []).map((o: { id: string }) => o.id);
-    if (matchedOrderIds.length > 0) {
-      conditions.push(`order_id.in.(${matchedOrderIds.join(",")})`);
+  if (filters?.search || filters?.searchTerm) {
+    const term = (filters.search || filters.searchTerm || "").trim();
+    if (term) {
+      const cleanTerm = term.replace(/^#/, "").toLowerCase();
+      const { data: rpcIds } = await supabase.rpc("search_tickets", { p_term: cleanTerm }).select("id").limit(500);
+      const rpcArray = Array.isArray(rpcIds) ? rpcIds : rpcIds ? [rpcIds] : [];
+      const matchedIds = rpcArray.map((r: { id: string }) => r.id);
+      if (matchedIds.length > 0) {
+        query = query.in("id", matchedIds);
+      } else {
+        query = query.eq("id", "00000000-0000-0000-0000-000000000000");
+      }
     }
-    query = query.or(conditions.join(","));
   }
 
   query = query.range(offset, offset + limit - 1);
@@ -173,12 +205,12 @@ export async function fetchTickets(filters?: {
     const comments = row.comments as Array<{ count: number }> | undefined;
     return {
       ...(row as unknown as OrderTicket),
-      order_number: (order?.odoo_order_name as string) || (order?.external_order_id as string) || null,
-      order_customer_name: (order?.customer_name as string) || null,
+      order_number: (order?.odoo_order_name as string) || (order?.external_order_id as string) || (row.raw_payload as Record<string, unknown>)?.order_reference as string || (row.raw_payload as Record<string, unknown>)?.order_name as string || null,
+      order_customer_name: (order?.customer_name as string) || (row.raw_payload as Record<string, unknown>)?.customer_name_xl as string || (row.raw_payload as Record<string, unknown>)?.customer_name as string || (row.assigned_to_full_name as string) || null,
       order_amount: (order?.total_amount as number) ?? null,
       order_delivery_status: (order?.delivery_status as string) || null,
-      order_commitment_date: (order?.commitment_date as string) || null,
-      creator_name: (creator?.full_name as string) || null,
+      order_commitment_date: (order?.commitment_date as string) || (row.raw_payload as Record<string, unknown>)?.due_date_excel as string || (row.raw_payload as Record<string, unknown>)?.due_date as string || null,
+      creator_name: (creator?.full_name as string) || (row.raw_payload as Record<string, unknown>)?.created_by_name as string || null,
       assignee_name: (assignee?.full_name as string) || null,
       comment_count: comments?.[0]?.count ?? 0,
     };
@@ -256,6 +288,19 @@ export async function createTicket(input: {
   assignedTo?: string | null;
   createdBy: string;
   dueDate?: string | null;
+  scope?: TicketScope;
+  assignedDepartments?: string[];
+  assignedUserIds?: string[];
+  items?: Array<{
+    orderLineItemId: string;
+    productName: string;
+    productCode?: string;
+    category?: string;
+    priority: TicketPriority;
+    description?: string;
+    assignedDepartments?: string[];
+    assignedUserIds?: string[];
+  }>;
 }) {
   const { data, error } = await supabase
     .from("order_tickets")
@@ -269,13 +314,38 @@ export async function createTicket(input: {
       assigned_to: input.assignedTo ?? null,
       created_by: input.createdBy,
       status: "open",
+      scope: input.scope ?? "order",
+      assigned_departments: input.assignedDepartments ?? [],
+      assigned_user_ids: input.assignedUserIds ?? [],
       raw_payload: input.dueDate ? { due_date: input.dueDate } : null,
     })
     .select("*")
     .single();
 
   if (error) throw error;
-  return data as unknown as OrderTicket;
+  const ticket = data as unknown as OrderTicket;
+
+  if (input.items && input.items.length > 0) {
+    const ticketItems = input.items.map((item) => ({
+      ticket_id: ticket.id,
+      order_line_item_id: item.orderLineItemId,
+      product_name: item.productName,
+      product_code: item.productCode ?? null,
+      category: item.category ?? null,
+      priority: item.priority,
+      description: item.description ?? null,
+      assigned_departments: item.assignedDepartments ?? [],
+      assigned_user_ids: item.assignedUserIds ?? [],
+      status: "open" as const,
+    }));
+
+    const { error: itemsError } = await supabase
+      .from("ticket_items")
+      .insert(ticketItems);
+    if (itemsError) throw itemsError;
+  }
+
+  return ticket;
 }
 
 export async function updateTicketStatus(ticketId: string, status: TicketStatus) {
@@ -361,3 +431,95 @@ export async function fetchTicketStats() {
     urgent: rows.filter((r) => r.priority === "urgent").length,
   };
 }
+
+export async function fetchOrderLineItems(orderId: string): Promise<OrderLineItemOption[]> {
+  const { data, error } = await supabase
+    .from("order_line_items")
+    .select("id, product_name, product_code, ordered_quantity, unit_price, total_amount, display_type")
+    .eq("order_id", orderId)
+    .is("display_type", null)
+    .gte("ordered_quantity", 1)
+    .order("sort_order");
+  if (error) throw error;
+  return (data ?? []) as OrderLineItemOption[];
+}
+
+export async function fetchTicketItems(ticketId: string): Promise<TicketItem[]> {
+  const { data, error } = await supabase
+    .from("ticket_items")
+    .select("*")
+    .eq("ticket_id", ticketId)
+    .order("created_at");
+  if (error) throw error;
+  return (data ?? []) as TicketItem[];
+}
+
+export async function fetchTicketsForExport(filters?: {
+  status?: TicketStatus | "all";
+  priority?: TicketPriority | "all";
+  search?: string;
+  searchTerm?: string;
+}) {
+  const term = (filters?.search || filters?.searchTerm || "").trim().toLowerCase();
+  let query = supabase
+    .from("order_tickets")
+    .select("id, subject, description, status, priority, category, created_at, updated_at, resolved_at, closed_at, order:orders(id, odoo_order_name, external_order_id, customer_name, total_amount, delivery_status), creator:profiles!order_tickets_created_by_fkey(full_name), assignee:profiles!order_tickets_assigned_to_fkey(full_name)")
+    .order("created_at", { ascending: false });
+  if (filters?.status && filters.status !== "all") query = query.eq("status", filters.status);
+  if (filters?.priority && filters.priority !== "all") query = query.eq("priority", filters.priority);
+  if (term) {
+    query = query.or(`subject.ilike.%${term}%,description.ilike.%${term}%`);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function deleteTicket(ticketId: string) {
+  const { error } = await supabase.from("order_tickets").delete().eq("id", ticketId);
+  if (error) throw error;
+}
+
+export async function fetchCustomerServiceAnalytics(startISO: string, endISO: string) {
+  const [totalRes, resolvedRes, categoryRes, deptRes, deliveryRes, dailyRes, agentRes] = await Promise.all([
+    supabase.from("order_tickets").select("id", { count: "exact", head: true }).gte("created_at", startISO).lte("created_at", endISO),
+    supabase.from("order_tickets").select("id", { count: "exact", head: true }).gte("created_at", startISO).lte("created_at", endISO).in("status", ["resolved", "closed"]),
+    supabase.from("order_tickets").select("category").gte("created_at", startISO).lte("created_at", endISO),
+    supabase.from("order_tickets").select("assigned_departments").gte("created_at", startISO).lte("created_at", endISO),
+    supabase.from("order_tickets").select("order:orders(delivery_status), raw_payload").gte("created_at", startISO).lte("created_at", endISO),
+    supabase.from("order_tickets").select("created_at").gte("created_at", startISO).lte("created_at", endISO),
+    supabase.from("order_tickets").select("created_by, status, resolved_at, created_at").gte("created_at", startISO).lte("created_at", endISO),
+  ]);
+  const total = totalRes.count ?? 0;
+  const resolved = resolvedRes.count ?? 0;
+  const categoryRows = (categoryRes.data ?? []) as Array<{ category: string | null }>;
+  const byCategory: Record<string, number> = {};
+  for (const row of categoryRows) { const key = row.category || "other"; byCategory[key] = (byCategory[key] || 0) + 1; }
+  const deptRows = (deptRes.data ?? []) as Array<{ assigned_departments: string[] | null }>;
+  const byDepartment: Record<string, number> = {};
+  for (const row of deptRows) { for (const d of (row.assigned_departments ?? [])) { byDepartment[d] = (byDepartment[d] || 0) + 1; } }
+  const deliveryRows = (deliveryRes.data ?? []) as Array<{ order: { delivery_status: string | null } | { delivery_status: string | null }[] | null; raw_payload: Record<string, unknown> | null }>;
+  const byDelivery: Record<string, number> = {};
+  const deliveryLabels: Record<string, string> = { full: "تم بالكامل", partial: "ارجاع جزئي", cancelled: "ارجاع كلي", pending: "قيد الانتظار", other_delivery: "أخرى", unknown: "غير معروف" };
+  for (const row of deliveryRows) {
+    const o = Array.isArray(row.order) ? row.order[0] : row.order;
+    let key = o?.delivery_status || "unknown";
+    if (key === "false") key = "cancelled";
+    if (key === "unknown" || key === null) {
+      const xlStatus = row.raw_payload?.delivery_status_xl;
+      if (xlStatus === "بالكامل") key = "full";
+      else if (xlStatus === "مرتجع جزئى") key = "partial";
+      else if (["مرتجع كلى بعد الوصول","مرتجع كلى قبل الوصول","مرتجع كلي","مرتجع كلى","الغاء"].includes(String(xlStatus ?? ""))) key = "cancelled";
+      else if (xlStatus) key = "other_delivery";
+    }
+    byDelivery[key] = (byDelivery[key] || 0) + 1;
+  }
+  const dailyRows = (dailyRes.data ?? []) as Array<{ created_at: string }>;
+  const byDay: Record<string, number> = {};
+  for (const row of dailyRows) { const day = row.created_at.slice(0, 10); byDay[day] = (byDay[day] || 0) + 1; }
+  const agentRows = (agentRes.data ?? []) as Array<{ created_by: string; status: string; resolved_at: string | null; created_at: string }>;
+  const agentMap: Record<string, { total: number; resolved: number; totalTime: number; count: number }> = {};
+  for (const row of agentRows) { const a = row.created_by; if (!agentMap[a]) agentMap[a] = { total: 0, resolved: 0, totalTime: 0, count: 0 }; agentMap[a].total++; if (row.status === "resolved" || row.status === "closed") { agentMap[a].resolved++; if (row.resolved_at) { agentMap[a].totalTime += new Date(row.resolved_at).getTime() - new Date(row.created_at).getTime(); agentMap[a].count++; } } }
+  return { total, resolved, percentage: total > 0 ? Math.round((resolved / total) * 100) : 0, byCategory, byDepartment, byDelivery, byDay, agentMap, deliveryLabels };
+}
+

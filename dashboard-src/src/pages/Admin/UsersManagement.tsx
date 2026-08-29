@@ -7,8 +7,10 @@ import { startTransition, useCallback, useEffect, useMemo, useState } from "reac
 import {
   BriefcaseIcon,
   CheckCircleIcon,
+  KeyIcon,
   MagnifyingGlassIcon,
   ShieldCheckIcon,
+  TrashIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
 import { Link } from "react-router";
@@ -20,8 +22,10 @@ import EmptyState from "../../components/ui/EmptyState";
 import PageHeader from "../../components/ui/PageHeader";
 import StatusBadge from "../../components/ui/StatusBadge";
 import { useCurrentAccess } from "../../hooks/useCurrentAccess";
+import { useAuth } from "../../context/AuthContext";
 import { fetchUserAccessRecords, getRoleLabel, ROLE_ORDER } from "../../lib/access-control";
-import { fetchAdminUsers } from "../../lib/admin-users";
+import { fetchAdminUsers, deleteAdminUser, generateAdminUserRecoveryLink } from "../../lib/admin-users";
+import { SUPER_ADMIN_EMAILS } from "../../lib/admin-access";
 import { supabase } from "../../lib/supabase";
 import type { ManagedRole, UserAccessRecord } from "../../types/access-control";
 
@@ -80,6 +84,8 @@ function formatDate(value: string) {
 
 export default function UsersManagement() {
   const { hasPermission, hasAnyPermission } = useCurrentAccess();
+  const { profile } = useAuth();
+  const isSuperAdmin = !!profile?.email && SUPER_ADMIN_EMAILS.includes(profile.email.trim().toLowerCase());
   const [users, setUsers] = useState<DirectoryUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -141,6 +147,52 @@ export default function UsersManagement() {
   useEffect(() => {
     void loadUsers();
   }, [loadUsers]);
+
+  const handleResetPassword = useCallback(
+    async (user: DirectoryUser) => {
+      if (
+        !window.confirm(
+          `إعادة تعيين كلمة السر للمستخدم "${user.fullName}"؟\nسيتم إنشاء رابط استعادة كلمة السر ونسخه.`,
+        )
+      ) {
+        return;
+      }
+      try {
+        const { actionLink } = await generateAdminUserRecoveryLink({
+          userId: user.id,
+          email: user.email,
+        });
+        try {
+          await navigator.clipboard.writeText(actionLink);
+          alert("تم إنشاء رابط إعادة تعيين كلمة السر ونسخه إلى الحافظة.\nأرسله للمستخدم لتعيين كلمة سر جديدة.");
+        } catch {
+          window.prompt("انسخ رابط إعادة تعيين كلمة السر وأرسله للمستخدم:", actionLink);
+        }
+      } catch (resetError) {
+        alert(resetError instanceof Error ? resetError.message : "فشل إنشاء رابط إعادة التعيين.");
+      }
+    },
+    [],
+  );
+
+  const handleDeleteUser = useCallback(
+    async (user: DirectoryUser) => {
+      if (
+        !window.confirm(
+          `حذف المستخدم "${user.fullName}" (${user.email}) نهائيًا؟\nلا يمكن التراجع عن هذا الإجراء.`,
+        )
+      ) {
+        return;
+      }
+      try {
+        await deleteAdminUser({ userId: user.id });
+        await loadUsers();
+      } catch (deleteError) {
+        alert(deleteError instanceof Error ? deleteError.message : "فشل حذف المستخدم.");
+      }
+    },
+    [loadUsers],
+  );
 
   const filteredUsers = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -369,7 +421,7 @@ export default function UsersManagement() {
                             {formatDate(user.createdAt)}
                           </td>
                           <td className="px-4 py-4">
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <Link
                                 to={`/admin/users/${user.id}`}
                                 className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-brand-25 dark:border-gray-700 dark:text-gray-300"
@@ -383,6 +435,28 @@ export default function UsersManagement() {
                                 >
                                   تعديل
                                 </Link>
+                              ) : null}
+                              {isSuperAdmin ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleResetPassword(user)}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 px-3 py-1.5 text-sm font-medium text-amber-700 transition hover:bg-amber-50 dark:border-amber-500/20 dark:text-amber-300 dark:hover:bg-amber-500/10"
+                                    title="إعادة تعيين كلمة السر"
+                                  >
+                                    <KeyIcon className="h-4 w-4" aria-hidden />
+                                    كلمة السر
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleDeleteUser(user)}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50 dark:border-red-500/20 dark:text-red-400 dark:hover:bg-red-500/10"
+                                    title="حذف المستخدم نهائيًا"
+                                  >
+                                    <TrashIcon className="h-4 w-4" aria-hidden />
+                                    حذف نهائي
+                                  </button>
+                                </>
                               ) : null}
                             </div>
                           </td>

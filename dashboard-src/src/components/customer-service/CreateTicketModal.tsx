@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { CheckIcon, ExclamationCircleIcon, MagnifyingGlassIcon, TicketIcon } from "@heroicons/react/24/outline";
+import {
+  CheckIcon,
+  ExclamationCircleIcon,
+  MagnifyingGlassIcon,
+  PlusIcon,
+  TicketIcon,
+  TrashIcon,
+} from "@heroicons/react/24/outline";
 import { Modal } from "../ui/modal";
 import { AdminField } from "../admin/AdminPageElements";
 import { ActivitySelectCard, CardOptionGroup } from "../customer-activity/ActivitySelectCards";
@@ -7,9 +14,12 @@ import {
   createTicket,
   fetchOrdersForTicket,
   fetchAssignableUsers,
+  fetchOrderLineItems,
   TICKET_PRIORITY_OPTIONS,
   TICKET_CATEGORY_OPTIONS,
   type TicketPriority,
+  type TicketScope,
+  type OrderLineItemOption,
 } from "../../lib/customer-service";
 
 const INPUT_CLASS =
@@ -46,6 +56,19 @@ interface UserOption {
   email: string;
 }
 
+interface TicketItemDraft {
+  orderLineItemId: string;
+  productName: string;
+  productCode: string | null;
+  quantity: number;
+  unitPrice: number;
+  category: string;
+  priority: TicketPriority;
+  description: string;
+  assignedDepartments: string[];
+  assignedUserIds: string[];
+}
+
 interface CreateTicketModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -65,13 +88,20 @@ export default function CreateTicketModal({
 
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [orderSearch, setOrderSearch] = useState("");
+  const [orderItems, setOrderItems] = useState<OrderLineItemOption[]>([]);
+  const [loadingItems, setLoadingItems] = useState(false);
+
+  const [scope, setScope] = useState<TicketScope>("order");
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TicketPriority>("medium");
   const [category, setCategory] = useState("");
   const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-  const [dueDate, setDueDate] = useState("");
+
+  const [ticketItems, setTicketItems] = useState<TicketItemDraft[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -107,15 +137,89 @@ export default function CreateTicketModal({
     if (!isOpen) return;
     setSelectedOrderId("");
     setOrderSearch("");
+    setOrderItems([]);
+    setScope("order");
+    setSelectedProductIds([]);
     setSubject("");
     setDescription("");
     setPriority("medium");
     setCategory("");
     setSelectedDepartments([]);
     setSelectedUserIds([]);
-    setDueDate("");
+    setTicketItems([]);
     setError(null);
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!selectedOrderId) {
+      setOrderItems([]);
+      return;
+    }
+    let active = true;
+    setLoadingItems(true);
+    fetchOrderLineItems(selectedOrderId)
+      .then((items) => {
+        if (active) setOrderItems(items);
+      })
+      .catch(() => {
+        // non-critical
+      })
+      .finally(() => {
+        if (active) setLoadingItems(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedOrderId]);
+
+  useEffect(() => {
+    if (scope !== "products") return;
+    const existing = new Set(ticketItems.map((i) => i.orderLineItemId));
+    const newItems: TicketItemDraft[] = [];
+    for (const pid of selectedProductIds) {
+      if (existing.has(pid)) continue;
+      const item = orderItems.find((o) => o.id === pid);
+      if (!item) continue;
+      newItems.push({
+        orderLineItemId: item.id,
+        productName: item.product_name,
+        productCode: item.product_code,
+        quantity: item.ordered_quantity,
+        unitPrice: item.unit_price,
+        category: "",
+        priority: "medium",
+        description: "",
+        assignedDepartments: [],
+        assignedUserIds: [],
+      });
+    }
+    if (newItems.length > 0) {
+      setTicketItems((prev) => [...prev, ...newItems]);
+    }
+    setTicketItems((prev) =>
+      prev.filter((i) => selectedProductIds.includes(i.orderLineItemId)),
+    );
+  }, [selectedProductIds, scope, orderItems]);
+
+  const updateTicketItem = (
+    orderLineItemId: string,
+    field: keyof TicketItemDraft,
+    value: unknown,
+  ) => {
+    setTicketItems((prev) =>
+      prev.map((item) =>
+        item.orderLineItemId === orderLineItemId
+          ? { ...item, [field]: value }
+          : item,
+      ),
+    );
+  };
+
+  const toggleProduct = (id: string) => {
+    setSelectedProductIds((prev) =>
+      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
+    );
+  };
 
   const handleSubmit = async () => {
     if (!selectedOrderId) {
@@ -124,6 +228,10 @@ export default function CreateTicketModal({
     }
     if (!subject.trim()) {
       setError("أدخل موضوع التذكرة.");
+      return;
+    }
+    if (scope === "products" && selectedProductIds.length === 0) {
+      setError("اختر منتج واحد على الأقل.");
       return;
     }
 
@@ -138,7 +246,22 @@ export default function CreateTicketModal({
         category: category || undefined,
         assignedTo: null,
         createdBy: currentUserId,
-        dueDate: dueDate || null,
+        scope,
+        assignedDepartments: scope === "order" ? selectedDepartments : [],
+        assignedUserIds: scope === "order" ? selectedUserIds : [],
+        items:
+          scope === "products"
+            ? ticketItems.map((item) => ({
+                orderLineItemId: item.orderLineItemId,
+                productName: item.productName,
+                productCode: item.productCode ?? undefined,
+                category: item.category || undefined,
+                priority: item.priority,
+                description: item.description || undefined,
+                assignedDepartments: item.assignedDepartments,
+                assignedUserIds: item.assignedUserIds,
+              }))
+            : undefined,
       });
       onCreated();
     } catch (saveError) {
@@ -148,8 +271,22 @@ export default function CreateTicketModal({
     }
   };
 
+  const formatEGP = (value: number) =>
+    new Intl.NumberFormat("ar-EG", {
+      style: "currency",
+      currency: "EGP",
+      maximumFractionDigits: 0,
+    }).format(value);
+
+  const selectedOrder = orders.find((o) => o.id === selectedOrderId);
+
   return (
-<Modal isOpen={isOpen} onClose={onClose} className="mx-4 flex max-h-[calc(100vh-2rem)] w-full max-w-3xl flex-col" contentClassName="flex flex-col min-h-0">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      className="mx-4 flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col"
+      contentClassName="flex flex-col min-h-0"
+    >
       <div className="shrink-0 border-b border-gray-200 px-4 py-5 dark:border-gray-800 sm:px-6">
         <div className="flex items-start gap-4">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
@@ -167,7 +304,7 @@ export default function CreateTicketModal({
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-5 sm:px-6">
         {/* Order Selection */}
-        <section className="rounded-2xl border border-gray-200 bg-brand-25/70 p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+        <section className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4 dark:border-gray-800 dark:bg-white/[0.03]">
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">الطلب المرتبط</p>
           {loadingData ? (
             <div className="rounded-2xl border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
@@ -205,7 +342,7 @@ export default function CreateTicketModal({
                         active={selectedOrderId === order.id}
                         onClick={() => setSelectedOrderId(order.id)}
                         title={orderNumber}
-                        subtitle={`${order.customer_name || "عميل"} - ${order.total_amount ? new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 0 }).format(order.total_amount) : "--"}`}
+                        subtitle={`${order.customer_name || "عميل"} - ${order.total_amount ? formatEGP(order.total_amount) : "--"}`}
                         icon={<TicketIcon className="h-5 w-5" aria-hidden />}
                       />
                     );
@@ -219,7 +356,120 @@ export default function CreateTicketModal({
           )}
         </section>
 
-        {/* Subject & Description */}
+        {/* Order Line Items + Scope Selection */}
+        {selectedOrderId && (
+          <section className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">منتجات الأوردر</p>
+            {loadingItems ? (
+              <div className="rounded-2xl border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
+                جار تحميل المنتجات...
+              </div>
+            ) : orderItems.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">لا توجد منتجات في هذا الطلب.</p>
+            ) : (
+              <>
+                <div className="mb-4 grid gap-2 max-h-56 overflow-y-auto">
+                  {orderItems.map((item) => {
+                    const isSelected = selectedProductIds.includes(item.id);
+                    return (
+                      <label
+                        key={item.id}
+                        className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-sm transition ${
+                          isSelected
+                            ? "border-blue-200 bg-white text-blue-700 ring-1 ring-blue-200 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200"
+                            : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleProduct(item.id)}
+                          className="sr-only"
+                        />
+                        <span
+                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
+                            isSelected
+                              ? "border-blue-600 bg-blue-600 text-white"
+                              : "border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-900"
+                          }`}
+                        >
+                          {isSelected ? <CheckIcon className="h-3.5 w-3.5" aria-hidden /> : null}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate font-medium">{item.product_name}</span>
+                          <span className="block text-xs text-gray-500 dark:text-gray-400">
+                            الكمية: {item.ordered_quantity} | السعر: {formatEGP(item.unit_price)}
+                          </span>
+                        </div>
+                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                          {formatEGP(item.total_amount)}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">نطاق المشكلة</p>
+                  <div className="flex gap-3">
+                    <label
+                      className={`flex cursor-pointer items-center gap-2 rounded-xl border px-4 py-2.5 text-sm transition ${
+                        scope === "order"
+                          ? "border-blue-200 bg-blue-50 text-blue-700 ring-1 ring-blue-200 dark:border-blue-500/30 dark:bg-blue-500/10"
+                          : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-950"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="scope"
+                        checked={scope === "order"}
+                        onChange={() => {
+                          setScope("order");
+                          setSelectedProductIds([]);
+                          setTicketItems([]);
+                        }}
+                        className="sr-only"
+                      />
+                      <span
+                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
+                          scope === "order" ? "border-blue-600" : "border-gray-300 dark:border-gray-600"
+                        }`}
+                      >
+                        {scope === "order" ? <span className="h-2 w-2 rounded-full bg-blue-600" /> : null}
+                      </span>
+                      المشكلة في الأوردر كله
+                    </label>
+                    <label
+                      className={`flex cursor-pointer items-center gap-2 rounded-xl border px-4 py-2.5 text-sm transition ${
+                        scope === "products"
+                          ? "border-blue-200 bg-blue-50 text-blue-700 ring-1 ring-blue-200 dark:border-blue-500/30 dark:bg-blue-500/10"
+                          : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-950"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="scope"
+                        checked={scope === "products"}
+                        onChange={() => setScope("products")}
+                        className="sr-only"
+                      />
+                      <span
+                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
+                          scope === "products" ? "border-blue-600" : "border-gray-300 dark:border-gray-600"
+                        }`}
+                      >
+                        {scope === "products" ? <span className="h-2 w-2 rounded-full bg-blue-600" /> : null}
+                      </span>
+                      المشكلة في منتجات محددة
+                    </label>
+                  </div>
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
+        {/* Subject & Description (always shown) */}
         <div className="grid gap-5 md:grid-cols-2">
           <div className="md:col-span-2">
             <AdminField label="موضوع التذكرة">
@@ -246,157 +496,68 @@ export default function CreateTicketModal({
           </div>
         </div>
 
-        {/* Priority & Category */}
-        <div className="grid gap-5 md:grid-cols-2">
-          <div className="md:col-span-2">
-            <CardOptionGroup
-              label="الأولوية"
-              options={TICKET_PRIORITY_OPTIONS}
-              value={priority}
-              onChange={(value) => setPriority(value as TicketPriority)}
-            />
-          </div>
+        {/* Scope-specific fields */}
+        {scope === "order" && (
+          <>
+            {/* Priority & Category */}
+            <div className="grid gap-5 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <CardOptionGroup
+                  label="الأولوية"
+                  options={TICKET_PRIORITY_OPTIONS}
+                  value={priority}
+                  onChange={(value) => setPriority(value as TicketPriority)}
+                />
+              </div>
 
-          <div className="md:col-span-2">
-            <AdminField label="الفئة">
-              <select
-                value={category}
-                onChange={(event) => setCategory(event.target.value)}
-                className={INPUT_CLASS}
-              >
-                <option value="">اختر فئة...</option>
-                {TICKET_CATEGORY_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </AdminField>
-          </div>
-
-          <div className="md:col-span-2">
-            <AdminField label="تاريخ الاستحقاق (اختياري)">
-              <input
-                type="date"
-                value={dueDate}
-                onChange={(event) => setDueDate(event.target.value)}
-                className={INPUT_CLASS}
-                dir="ltr"
-              />
-            </AdminField>
-          </div>
-        </div>
-
-        {/* Assignment */}
-        <section className="space-y-4 rounded-2xl border border-gray-200 bg-brand-25/70 p-4 dark:border-gray-800 dark:bg-white/[0.03]">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-              التوجيه
-            </p>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              اختر الأقسام والمستخدمين المرتبطين بمتابعة التذكرة.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
-              الأقسام
-            </span>
-            <div role="group" aria-label="الأقسام" className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {DEPARTMENT_OPTIONS.map((department) => {
-                const isSelected = selectedDepartments.includes(department);
-                return (
-                  <label
-                    key={department}
-                    className={`flex min-h-10 cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 text-sm transition focus-within:ring-4 focus-within:ring-blue-500/10 ${
-                      isSelected
-                        ? "border-blue-200 bg-white text-blue-700 ring-1 ring-blue-200 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200 dark:ring-blue-500/20"
-                        : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-brand-25 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:hover:border-gray-600 dark:hover:bg-white/[0.04]"
-                    }`}
+              <div className="md:col-span-2">
+                <AdminField label="الفئة">
+                  <select
+                    value={category}
+                    onChange={(event) => setCategory(event.target.value)}
+                    className={INPUT_CLASS}
                   >
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() =>
-                        setSelectedDepartments((current) =>
-                          current.includes(department)
-                            ? current.filter((value) => value !== department)
-                            : [...current, department],
-                        )
-                      }
-                      className="sr-only"
-                    />
-                    <span
-                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
-                        isSelected
-                          ? "border-blue-600 bg-blue-600 text-white"
-                          : "border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-900"
-                      }`}
-                    >
-                      {isSelected ? <CheckIcon className="h-3.5 w-3.5" aria-hidden /> : null}
-                    </span>
-                    <span className="truncate font-medium">{department}</span>
-                  </label>
-                );
-              })}
+                    <option value="">اختر فئة...</option>
+                    {TICKET_CATEGORY_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </AdminField>
+              </div>
             </div>
-          </div>
 
-          <div className="space-y-2">
-            <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
-              المستخدمون
-            </span>
-            <div
-              role="group"
-              aria-label="المستخدمون"
-              className="max-h-44 overflow-y-auto rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-950"
-            >
-              {users.length > 0 ? (
-                users.map((user) => {
-                  const isSelected = selectedUserIds.includes(user.id);
-                  return (
-                    <label
-                      key={user.id}
-                      className={`flex min-h-12 cursor-pointer items-center gap-3 border-b border-gray-100 px-3 py-2.5 text-sm transition focus-within:ring-4 focus-within:ring-blue-500/10 last:border-b-0 dark:border-gray-800 ${
-                        isSelected
-                          ? "bg-blue-50/80 text-blue-700 dark:bg-blue-500/10 dark:text-blue-200"
-                          : "text-gray-700 hover:bg-brand-25 dark:text-gray-100 dark:hover:bg-white/[0.04]"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() =>
-                          setSelectedUserIds((current) =>
-                            current.includes(user.id)
-                              ? current.filter((value) => value !== user.id)
-                              : [...current, user.id],
-                          )
-                        }
-                        className="sr-only"
-                      />
-                      <span
-                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
-                          isSelected
-                            ? "border-blue-600 bg-blue-600 text-white"
-                            : "border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-900"
-                        }`}
-                      >
-                        {isSelected ? <CheckIcon className="h-3.5 w-3.5" aria-hidden /> : null}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{user.full_name}</span>
-                        <span className="block truncate text-xs text-gray-500 dark:text-gray-400">{user.email}</span>
-                      </span>
-                    </label>
-                  );
-                })
-              ) : (
-                <p className="px-2 py-3 text-sm text-gray-500 dark:text-gray-400">لا يوجد مستخدمون متاحون.</p>
-              )}
-            </div>
+            {/* Assignment */}
+            <AssignmentSection
+              selectedDepartments={selectedDepartments}
+              setSelectedDepartments={setSelectedDepartments}
+              selectedUserIds={selectedUserIds}
+              setSelectedUserIds={setSelectedUserIds}
+              users={users}
+            />
+          </>
+        )}
+
+        {scope === "products" && ticketItems.length > 0 && (
+          <div className="space-y-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
+              تفاصيل كل منتج ({ticketItems.length} منتج)
+            </p>
+            {ticketItems.map((item) => (
+              <ProductItemCard
+                key={item.orderLineItemId}
+                item={item}
+                users={users}
+                onUpdate={(field, value) => updateTicketItem(item.orderLineItemId, field, value)}
+                onRemove={() => {
+                  setSelectedProductIds((prev) => prev.filter((p) => p !== item.orderLineItemId));
+                  setTicketItems((prev) => prev.filter((i) => i.orderLineItemId !== item.orderLineItemId));
+                }}
+              />
+            ))}
           </div>
-        </section>
+        )}
 
         {error ? (
           <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200">
@@ -410,7 +571,7 @@ export default function CreateTicketModal({
         <button
           type="button"
           onClick={onClose}
-          className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-brand-25 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/[0.03]"
+          className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/[0.03]"
         >
           إلغاء
         </button>
@@ -424,5 +585,230 @@ export default function CreateTicketModal({
         </button>
       </div>
     </Modal>
+  );
+}
+
+/* ─── Assignment Section (shared) ────────────────────────────────────────── */
+
+function AssignmentSection({
+  selectedDepartments,
+  setSelectedDepartments,
+  selectedUserIds,
+  setSelectedUserIds,
+  users,
+}: {
+  selectedDepartments: string[];
+  setSelectedDepartments: (fn: (prev: string[]) => string[]) => void;
+  selectedUserIds: string[];
+  setSelectedUserIds: (fn: (prev: string[]) => string[]) => void;
+  users: UserOption[];
+}) {
+  return (
+    <section className="space-y-4 rounded-2xl border border-gray-200 bg-gray-50/70 p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">التوجيه</p>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+          اختر الأقسام والمستخدمين المرتبطين بمتابعة التذكرة.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+          الأقسام
+        </span>
+        <div role="group" aria-label="الأقسام" className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {DEPARTMENT_OPTIONS.map((department) => {
+            const isSelected = selectedDepartments.includes(department);
+            return (
+              <label
+                key={department}
+                className={`flex min-h-10 cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 text-sm transition focus-within:ring-4 focus-within:ring-blue-500/10 ${
+                  isSelected
+                    ? "border-blue-200 bg-white text-blue-700 ring-1 ring-blue-200 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200 dark:ring-blue-500/20"
+                    : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:hover:border-gray-600 dark:hover:bg-white/[0.04]"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() =>
+                    setSelectedDepartments((current) =>
+                      current.includes(department)
+                        ? current.filter((value) => value !== department)
+                        : [...current, department],
+                    )
+                  }
+                  className="sr-only"
+                />
+                <span
+                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
+                    isSelected
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : "border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-900"
+                  }`}
+                >
+                  {isSelected ? <CheckIcon className="h-3.5 w-3.5" aria-hidden /> : null}
+                </span>
+                <span className="truncate font-medium">{department}</span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+          المستخدمون
+        </span>
+        <div
+          role="group"
+          aria-label="المستخدمون"
+          className="max-h-44 overflow-y-auto rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-950"
+        >
+          {users.length > 0 ? (
+            users.map((user) => {
+              const isSelected = selectedUserIds.includes(user.id);
+              return (
+                <label
+                  key={user.id}
+                  className={`flex min-h-12 cursor-pointer items-center gap-3 border-b border-gray-100 px-3 py-2.5 text-sm transition focus-within:ring-4 focus-within:ring-blue-500/10 last:border-b-0 dark:border-gray-800 ${
+                    isSelected
+                      ? "bg-blue-50/80 text-blue-700 dark:bg-blue-500/10 dark:text-blue-200"
+                      : "text-gray-700 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-white/[0.04]"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() =>
+                      setSelectedUserIds((current) =>
+                        current.includes(user.id)
+                          ? current.filter((value) => value !== user.id)
+                          : [...current, user.id],
+                      )
+                    }
+                    className="sr-only"
+                  />
+                  <span
+                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
+                      isSelected
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : "border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-900"
+                    }`}
+                  >
+                    {isSelected ? <CheckIcon className="h-3.5 w-3.5" aria-hidden /> : null}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{user.full_name}</span>
+                    <span className="block truncate text-xs text-gray-500 dark:text-gray-400">{user.email}</span>
+                  </span>
+                </label>
+              );
+            })
+          ) : (
+            <p className="px-2 py-3 text-sm text-gray-500 dark:text-gray-400">لا يوجد مستخدمون متاحون.</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ─── Product Item Card ──────────────────────────────────────────────────── */
+
+function ProductItemCard({
+  item,
+  users,
+  onUpdate,
+  onRemove,
+}: {
+  item: TicketItemDraft;
+  users: UserOption[];
+  onUpdate: (field: keyof TicketItemDraft, value: unknown) => void;
+  onRemove: () => void;
+}) {
+  const [itemDepartments, setItemDepartments] = useState<string[]>(item.assignedDepartments);
+  const [itemUsers, setItemUsers] = useState<string[]>(item.assignedUserIds);
+
+  const syncDepartments = (fn: (prev: string[]) => string[]) => {
+    const next = fn(itemDepartments);
+    setItemDepartments(next);
+    onUpdate("assignedDepartments", next);
+  };
+
+  const syncUsers = (fn: (prev: string[]) => string[]) => {
+    const next = fn(itemUsers);
+    setItemUsers(next);
+    onUpdate("assignedUserIds", next);
+  };
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-950">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="min-w-0 flex-1">
+          <h4 className="truncate text-sm font-semibold text-gray-900 dark:text-white">{item.productName}</h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {item.productCode && `كود: ${item.productCode} | `}
+            الكمية: {item.quantity} | السعر:{" "}
+            {new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 0 }).format(
+              item.unitPrice,
+            )}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="ml-2 rounded-lg p-1.5 text-gray-400 transition hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10"
+        >
+          <TrashIcon className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div>
+          <CardOptionGroup
+            label="الأولوية"
+            options={TICKET_PRIORITY_OPTIONS}
+            value={item.priority}
+            onChange={(value) => onUpdate("priority", value as TicketPriority)}
+          />
+        </div>
+
+        <AdminField label="الفئة">
+          <select
+            value={item.category}
+            onChange={(event) => onUpdate("category", event.target.value)}
+            className={INPUT_CLASS}
+          >
+            <option value="">اختر فئة...</option>
+            {TICKET_CATEGORY_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </AdminField>
+
+        <div className="md:col-span-2">
+          <AdminField label="الوصف (اختياري)">
+            <textarea
+              rows={2}
+              value={item.description}
+              onChange={(event) => onUpdate("description", event.target.value)}
+              className={INPUT_CLASS}
+              placeholder="تفاصيل مشكلة هذا المنتج..."
+            />
+          </AdminField>
+        </div>
+      </div>
+
+      <AssignmentSection
+        selectedDepartments={itemDepartments}
+        setSelectedDepartments={syncDepartments}
+        selectedUserIds={itemUsers}
+        setSelectedUserIds={syncUsers}
+        users={users}
+      />
+    </div>
   );
 }

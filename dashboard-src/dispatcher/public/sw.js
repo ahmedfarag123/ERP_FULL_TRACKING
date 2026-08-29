@@ -1,4 +1,4 @@
-const CACHE_NAME = 'horeca-smart-dispatcher-v2';
+const CACHE_NAME = 'horeca-smart-dispatcher-v3';
 const APP_SHELL = [
   '/dispatcher/',
   '/dispatcher/index.html',

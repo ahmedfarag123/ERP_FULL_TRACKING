@@ -237,6 +237,13 @@ export async function setAdminUserPassword(payload: {
   });
 }
 
+export async function deleteAdminUser(payload: { userId: string }) {
+  return invokeAdminUserAuth<{ deleted: boolean }>({
+    action: "delete-user",
+    payload,
+  });
+}
+
 export async function assignCustomerToUser(customerId: string, userId: string | null) {
   const { error } = await supabase
     .from("customers")

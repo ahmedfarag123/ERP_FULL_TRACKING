@@ -31,11 +31,11 @@ function mapOdooStatus(state) {
 function isActualSalesOrder(order) {
   const typeName = typeof order.type_name === 'string' ? order.type_name.trim().toLowerCase() : '';
   const state = String(order.state ?? '').trim().toLowerCase();
-  if (state) {
-    return state === 'sale' || state === 'done';
-  }
   if (typeName) {
     return typeName === 'sales order';
+  }
+  if (state) {
+    return ['draft', 'sent', 'sale', 'done', 'cancel'].includes(state);
   }
   return false;
 }
@@ -231,8 +231,11 @@ Deno.serve(async (req)=>{
         'state',
         'in',
         [
+          'draft',
+          'sent',
           'sale',
-          'done'
+          'done',
+          'cancel'
         ]
       ]
     ] : orderFieldNames.has('type_name') ? [

@@ -263,7 +263,9 @@ async function createUser(actor, payload) {
   const userId = String(authResponse.data.user.id);
   const timestamp = new Date().toISOString();
   const requiresPasswordChange = Boolean(initialPassword && !sendInvite);
-  const profileUpdate = {
+  const profileUpsert = {
+    id: userId,
+    email,
     full_name: fullName,
     role,
     department_id: departmentId,
@@ -279,22 +281,15 @@ async function createUser(actor, payload) {
     temporary_password_set_at: requiresPasswordChange ? timestamp : null,
     password_changed_at: requiresPasswordChange ? null : timestamp
   };
-  let { error: updateError } = await adminClient.from("profiles").update(profileUpdate).eq("id", userId);
+  let { error: updateError } = await adminClient.from("profiles").upsert(profileUpsert, { onConflict: "id" });
   if (updateError && isMissingProfileColumnError(updateError.message)) {
-    ({ error: updateError } = await adminClient.from("profiles").update({
-      full_name: fullName,
-      role,
-      phone,
-      status,
-      approved_at: timestamp,
-      approved_by: actor.id,
-      password_enabled: true,
-      otp_enabled: false,
-      prefer_otp: false,
-      requires_password_change: requiresPasswordChange,
-      temporary_password_set_at: requiresPasswordChange ? timestamp : null,
-      password_changed_at: requiresPasswordChange ? null : timestamp
-    }).eq("id", userId));
+    const { id, email: em, full_name: fn, role: rl, phone: ph, status: st, approved_at: aa, approved_by: ab, password_enabled: pe, otp_enabled: oe, prefer_otp: po, requires_password_change: rpc, temporary_password_set_at: tps, password_changed_at: pca } = profileUpsert;
+    ({ error: updateError } = await adminClient.from("profiles").upsert({
+      id, email: em, full_name: fn, role: rl, phone: ph, status: st,
+      approved_at: aa, approved_by: ab, password_enabled: pe, otp_enabled: oe,
+      prefer_otp: po, requires_password_change: rpc,
+      temporary_password_set_at: tps, password_changed_at: pca
+    }, { onConflict: "id" }));
   }
   if (updateError) {
     throw new Error(updateError.message);
@@ -431,6 +426,56 @@ async function setPassword(actor, payload) {
     updated: true
   };
 }
+async function deleteUser(actor, payload) {
+  const userId = normalizeText(payload.userId);
+  if (!userId) throw new Error("User id is required.");
+  if (userId === actor.id) {
+    throw new Error("You cannot delete your own account.");
+  }
+
+  const { data: profileRow, error: profileFetchError } = await adminClient
+    .from("profiles")
+    .select("email, full_name")
+    .eq("id", userId)
+    .single();
+  if (profileFetchError) throw new Error(profileFetchError.message);
+
+  const { error: profilesError } = await adminClient
+    .from("profiles")
+    .delete()
+    .eq("id", userId);
+  if (profilesError) throw new Error(profilesError.message);
+
+  const { error: userAccessError } = await adminClient
+    .from("user_access")
+    .delete()
+    .eq("user_id", userId);
+  // user_access may not exist for every user; ignore missing table errors
+  if (userAccessError && !String(userAccessError.message).includes("does not exist")) {
+    throw new Error(userAccessError.message);
+  }
+
+  const { error: authError } = await adminClient.auth.admin.deleteUser(userId);
+  if (authError) throw new Error(authError.message);
+
+  await insertAuditLog({
+    actorUserId: actor.id,
+    actorEmail: actor.email,
+    actionType: "admin_delete_user",
+    entityType: "profile",
+    entityId: userId,
+    description: "Permanently deleted managed user account",
+    metadata: {
+      user_id: userId,
+      email: profileRow?.email ?? null
+    }
+  });
+
+  return {
+    deleted: true
+  };
+}
+
 Deno.serve(async (request)=>{
   if (request.method === "OPTIONS") {
     return new Response("ok", {
@@ -453,6 +498,9 @@ Deno.serve(async (request)=>{
     }
     if (action === "set-password") {
       return jsonResponse(await setPassword(actor, payload));
+    }
+    if (action === "delete-user") {
+      return jsonResponse(await deleteUser(actor, payload));
     }
     return jsonResponse({
       error: "Unsupported admin user auth action."

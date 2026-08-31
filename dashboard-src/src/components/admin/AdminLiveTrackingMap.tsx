@@ -13,6 +13,29 @@ import "leaflet/dist/leaflet.css";
 
 const ORS_API_KEY = String(import.meta.env.VITE_ORS_API_KEY ?? "").trim();
 
+const TILE_MODES = [
+  {
+    id: "map",
+    label: "خريطة",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  },
+  {
+    id: "satellite",
+    label: "قمر صناعي",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics",
+  },
+  {
+    id: "terrain",
+    label: "تضاريس",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ",
+  },
+] as const;
+
+export type MapTileMode = (typeof TILE_MODES)[number]["id"];
+
 export type MapDriverLocation = {
   driverId: string;
   driverName: string;
@@ -208,6 +231,7 @@ function PlanRouteLine({
   warehouseLatitude,
   warehouseLongitude,
   isActive,
+  useOrs,
   onClick,
 }: {
   stops: MapShipmentStop[];
@@ -215,6 +239,7 @@ function PlanRouteLine({
   warehouseLatitude: number;
   warehouseLongitude: number;
   isActive: boolean;
+  useOrs: boolean;
   onClick: () => void;
 }) {
   const [orsRoute, setOrsRoute] = useState<LatLngExpression[] | null>(null);
@@ -231,13 +256,17 @@ function PlanRouteLine({
   const pointsKey = points.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join("|");
 
   useEffect(() => {
+    if (!useOrs) {
+      setOrsRoute(null);
+      return;
+    }
     let cancelled = false;
     const timer = setTimeout(async () => {
       const route = await fetchOrsRoute(points);
       if (!cancelled) setOrsRoute(route);
     }, 300);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [pointsKey]);
+  }, [pointsKey, useOrs]);
 
   if (points.length < 2) return null;
 
@@ -414,6 +443,31 @@ function RouteCard({
 
 function TrackingMapInner({ drivers, plans }: Props) {
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [tileMode, setTileMode] = useState<MapTileMode>("map");
+  const [fullscreen, setFullscreen] = useState(false);
+  const [useOrs, setUseOrs] = useState(false);
+  const mapRef = useRef<HTMLDivElement>(null);
+
+  const activeTile = TILE_MODES.find((t) => t.id === tileMode) ?? TILE_MODES[0];
+
+  const toggleFullscreen = useCallback(() => {
+    setFullscreen((prev) => !prev);
+    const el = mapRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    const onFs = () => {
+      if (!document.fullscreenElement) setFullscreen(false);
+    };
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
 
   const plansWithSortedStops = useMemo(
     () =>
@@ -492,7 +546,10 @@ function TrackingMapInner({ drivers, plans }: Props) {
   }
 
   return (
-    <div className="relative h-[540px] overflow-hidden rounded-2xl border border-gray-200/80 dark:border-gray-700/80 flex shadow-lg">
+    <div
+      ref={mapRef}
+      className={`relative overflow-hidden rounded-2xl border border-gray-200/80 dark:border-gray-700/80 flex shadow-lg ${fullscreen ? "fixed inset-0 z-[9999] h-screen w-screen rounded-none border-0" : "h-[540px]"}`}
+    >
       {/* Sidebar */}
       <div className="w-72 flex-shrink-0 overflow-y-auto border-r border-gray-200/80 bg-white dark:border-gray-700/80 dark:bg-gray-900 flex flex-col">
         {/* Header */}
@@ -556,8 +613,10 @@ function TrackingMapInner({ drivers, plans }: Props) {
           style={{ height: "100%", width: "100%" }}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            key={activeTile.id}
+            attribution={activeTile.attribution}
+            url={activeTile.url}
+            maxZoom={activeTile.id === "map" ? 19 : 18}
           />
           {bounds && <FitBounds bounds={bounds} />}
 
@@ -573,6 +632,7 @@ function TrackingMapInner({ drivers, plans }: Props) {
                 warehouseLatitude={plan.warehouseLatitude}
                 warehouseLongitude={plan.warehouseLongitude}
                 isActive={!selectedPlanId || selectedPlanId === plan.planId}
+                useOrs={useOrs}
                 onClick={() => handleSelectPlan(plan.planId)}
               />
             );
@@ -621,6 +681,66 @@ function TrackingMapInner({ drivers, plans }: Props) {
             return <DriverMarker key={d.driverId} driver={d} icon={icon} />;
           })}
         </MapContainer>
+
+        {/* Map Mode Switcher (Google-Maps style) */}
+        <div className="absolute top-3 right-3 z-[1000] flex flex-col items-end gap-2">
+          <div className="flex overflow-hidden rounded-xl border border-gray-200/70 bg-white/90 shadow-lg backdrop-blur-sm dark:border-gray-700/70 dark:bg-gray-900/90">
+            {TILE_MODES.map((mode) => {
+              const isActiveMode = tileMode === mode.id;
+              return (
+                <button
+                  key={mode.id}
+                  onClick={() => setTileMode(mode.id)}
+                  className={`px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                    isActiveMode
+                      ? "bg-brand-600 text-white"
+                      : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06]"
+                  }`}
+                  style={{ fontFamily: "sans-serif" }}
+                >
+                  {mode.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-1.5 rounded-xl border border-gray-200/70 bg-white/90 px-2 py-1.5 shadow-lg backdrop-blur-sm dark:border-gray-700/70 dark:bg-gray-900/90">
+            <button
+              onClick={() => setUseOrs((v) => !v)}
+              title="خطوط الطرق الحقيقية (إن وجد مفتاح API)"
+              className={`rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors ${
+                useOrs
+                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                  : "text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/[0.06]"
+              }`}
+              style={{ fontFamily: "sans-serif", whiteSpace: "nowrap" }}
+            >
+              {useOrs ? "طرق حقيقية" : "خطوط مستقيمة"}
+            </button>
+            <button
+              onClick={toggleFullscreen}
+              title={fullscreen ? "خروج من ملء الشاشة" : "ملء الشاشة"}
+              className="rounded-lg p-1 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/[0.06]"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                {fullscreen ? (
+                  <>
+                    <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+                    <path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+                    <path d="M3 16h3a2 2 0 0 1 2 2v3" />
+                    <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+                  </>
+                ) : (
+                  <>
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+                    <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+                    <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+                    <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+                  </>
+                )}
+              </svg>
+            </button>
+          </div>
+        </div>
 
         {/* Floating Legend */}
         <div className="absolute bottom-3 left-3 z-[1000] bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm rounded-xl px-3 py-2.5 shadow-lg border border-gray-200/50 dark:border-gray-700/50">

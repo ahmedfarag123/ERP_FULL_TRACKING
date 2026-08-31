@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { AdminSection } from "./AdminPageElements";
 import { supabase } from "../../lib/supabase";
 import AdminLiveTrackingMap, {
   type MapDriverLocation,
@@ -8,9 +9,11 @@ import AdminLiveTrackingMap, {
 
 type Props = {
   className?: string;
+  refetchInterval?: number;
 };
 
 const DEFAULT_RANGE_DAYS = 30;
+const DEFAULT_REFETCH_INTERVAL = 10000;
 
 function lastNDayRange(days: number): { startISO: string; endISO: string } {
   const now = new Date();
@@ -23,7 +26,6 @@ async function fetchLiveMapData(startISO: string, endISO: string) {
   const startDay = startISO.slice(0, 10);
   const endDay = endISO.slice(0, 10);
 
-  // 1. Active plans in range
   const { data: plans, error: plansErr } = await supabase
     .from("logistics_delivery_plans")
     .select("id, plan_reference, assigned_profile_id, planned_date, plan_status")
@@ -32,12 +34,10 @@ async function fetchLiveMapData(startISO: string, endISO: string) {
     .lte("planned_date", endDay);
   if (plansErr) throw plansErr;
 
-  // 2. Driver profiles for plans
   const planDriverIds = [
     ...new Set((plans ?? []).map((p) => p.assigned_profile_id).filter(Boolean)),
   ] as string[];
 
-  // 3. Live driver locations
   const { data: liveRows } = await supabase
     .from("active_drivers_view")
     .select("id, full_name, latitude, longitude, updated_at");
@@ -55,7 +55,6 @@ async function fetchLiveMapData(startISO: string, endISO: string) {
     }
   }
 
-  // 4. Also fetch profiles for plan drivers not yet live
   const fetchDriverIds = planDriverIds.filter((id) => !liveDriverMap.has(id));
   if (fetchDriverIds.length > 0) {
     const { data: profiles } = await supabase
@@ -75,7 +74,6 @@ async function fetchLiveMapData(startISO: string, endISO: string) {
     }
   }
 
-  // 5. Fetch shipments for each active plan
   const planIds = (plans ?? []).map((p) => p.id);
   const shipmentsByPlan = new Map<string, MapShipmentStop[]>();
   const warehouseByPlan = new Map<string, string>();
@@ -108,7 +106,6 @@ async function fetchLiveMapData(startISO: string, endISO: string) {
     }
   }
 
-  // 6. Build map drivers (merge live + plan drivers with coords)
   const driverSet = new Set<string>();
   for (const id of planDriverIds) driverSet.add(id);
   for (const id of liveDriverMap.keys()) driverSet.add(id);
@@ -116,12 +113,9 @@ async function fetchLiveMapData(startISO: string, endISO: string) {
   const drivers: MapDriverLocation[] = [];
   for (const id of driverSet) {
     const live = liveDriverMap.get(id);
-    if (live && live.latitude !== 0) {
-      drivers.push(live);
-    }
+    if (live && live.latitude !== 0) drivers.push(live);
   }
 
-  // 7. Build plan routes
   const planRoutes: MapPlanRoute[] = [];
   for (const plan of plans ?? []) {
     const stops = shipmentsByPlan.get(plan.id) ?? [];
@@ -150,31 +144,28 @@ async function fetchLiveMapData(startISO: string, endISO: string) {
   return { drivers, planRoutes };
 }
 
-export default function LiveTrackingMapSection({ className = "" }: Props) {
+export default function LiveTrackingMapSection({
+  className = "",
+  refetchInterval = DEFAULT_REFETCH_INTERVAL,
+}: Props) {
   const { startISO, endISO } = lastNDayRange(DEFAULT_RANGE_DAYS);
   const { data, isLoading } = useQuery({
     queryKey: ["logistics", "live-map", startISO, endISO],
     queryFn: () => fetchLiveMapData(startISO, endISO),
-    refetchInterval: 3000,
+    refetchInterval,
   });
 
   return (
-    <section className={className}>
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-bold text-gray-900 dark:text-white" style={{ fontFamily: "sans-serif" }}>
-            خريطة التتبع الحي
-          </h3>
-          <p className="text-[11px] text-gray-400 dark:text-gray-500" style={{ fontFamily: "sans-serif" }}>
-            مواقع السائقين والخطط النشطة تتحدث كل 3 ثوانٍ
-          </p>
-        </div>
-      </div>
+    <AdminSection
+      className={className}
+      title="خريطة التتبع الحي"
+      description={`مواقع السائقين والخطط النشطة، تتحدث كل ${Math.round(refetchInterval / 1000)} ثوانٍ`}
+    >
       {isLoading ? (
-        <div className="h-[540px] animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800/60" />
+        <div className="h-[540px] animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800/60" />
       ) : (
         <AdminLiveTrackingMap drivers={data?.drivers ?? []} plans={data?.planRoutes ?? []} />
       )}
-    </section>
+    </AdminSection>
   );
 }

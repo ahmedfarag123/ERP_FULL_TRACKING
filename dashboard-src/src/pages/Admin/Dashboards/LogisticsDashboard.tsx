@@ -436,6 +436,27 @@ function useMapData({ range }: DateRangeProps) {
         }
       }
 
+      // 3b. Merge latest heading (direction) for drivers from location_tracking
+      const headingDriverIds = [...planDriverIds, ...liveDriverMap.keys()];
+      if (headingDriverIds.length > 0) {
+        const { data: headings } = await supabase
+          .from("location_tracking")
+          .select("user_id, heading_degrees")
+          .in("user_id", headingDriverIds)
+          .not("heading_degrees", "is", null)
+          .order("captured_at", { ascending: false })
+          .limit(headingDriverIds.length * 4);
+        const seen = new Set<string>();
+        for (const h of headings ?? []) {
+          if (seen.has(h.user_id)) continue;
+          seen.add(h.user_id);
+          const existing = liveDriverMap.get(h.user_id);
+          if (existing) {
+            liveDriverMap.set(h.user_id, { ...existing, headingDegrees: h.heading_degrees });
+          }
+        }
+      }
+
       // 4. Also fetch driver profiles for all plan drivers (even if not live yet)
       const fetchDriverIds = planDriverIds.filter((id) => !liveDriverMap.has(id));
       if (fetchDriverIds.length > 0) {

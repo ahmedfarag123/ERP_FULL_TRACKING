@@ -42,6 +42,7 @@ export type MapDriverLocation = {
   latitude: number;
   longitude: number;
   updatedAt: string;
+  headingDegrees?: number | null;
 };
 
 export type MapShipmentStop = {
@@ -130,8 +131,16 @@ function driverColor(index: number): string {
   return DRIVER_COLORS[index % DRIVER_COLORS.length];
 }
 
-function driverIconHtml(color: string): string {
-  return `<div style="width:32px;height:32px;border-radius:50%;background:${color};border:3px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.3);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg></div>`;
+function driverIconHtml(color: string, heading?: number | null): string {
+  const hasHeading = typeof heading === "number" && Number.isFinite(heading);
+  const rot = hasHeading ? heading! : 0;
+  const arrow = hasHeading
+    ? `<div style="position:absolute;top:50%;left:50%;width:20px;height:20px;transform:translate(-50%,-50%) rotate(${rot}deg);display:flex;align-items:center;justify-content:center;"><svg width="14" height="14" viewBox="0 0 24 24" style="transform:rotate(90deg)"><path d="M12 2 19 20l-7-4-7 4z" fill="${color}"/><path d="M12 6v10" stroke="white" stroke-width="1.5"/></svg></div>`
+    : "";
+  const dot = hasHeading
+    ? `<div style="position:absolute;top:50%;left:50%;width:12px;height:12px;transform:translate(-50%,-50%);border-radius:50%;background:${color};border:2.5px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.35);"></div>`
+    : `<div style="width:32px;height:32px;border-radius:50%;background:${color};border:3px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.3);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg></div>`;
+  return `<div style="position:relative;width:32px;height:32px;border-radius:50%;background:${color}22;border:2px solid ${color}55;box-shadow:0 2px 10px rgba(0,0,0,0.2);">${arrow}${dot}</div>`;
 }
 
 function shipmentStatusLabel(status: string | null): string {
@@ -291,20 +300,40 @@ function PlanRouteLine({
 
 // ─── Warehouse Marker ──────────────────────────────────────────────────────
 
-function WarehouseMarker({ latitude, longitude, color }: { latitude: number; longitude: number; color: string }) {
+function WarehouseMarker({
+  latitude,
+  longitude,
+  name,
+}: {
+  latitude: number;
+  longitude: number;
+  name: string;
+}) {
   const pos: LatLngExpression = [latitude, longitude];
   return (
     <Marker
       position={pos}
       icon={L.divIcon({
         className: "",
-        html: `<div style="width:36px;height:36px;background:${color};border:3px solid white;border-radius:8px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 12px rgba(0,0,0,0.3);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M3 21V8l9-5 9 5v13"/><path d="M9 21V12h6v9"/></svg></div>`,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18],
+        html: `<div style="position:relative;width:44px;height:44px;display:flex;align-items:center;justify-content:center;">
+          <div style="position:absolute;inset:0;background:#111827;opacity:0.15;border-radius:50%;transform:scale(1.25);"></div>
+          <div style="position:relative;width:30px;height:30px;border-radius:8px;background:#111827;border:2.5px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 12px rgba(0,0,0,0.35);">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2"><path d="M3 21V8l9-5 9 5v13"/><path d="M9 21V12h6v9"/></svg>
+          </div>
+          <div style="position:absolute;top:-3px;right:-3px;width:12px;height:12px;border-radius:50%;background:#10b981;border:2px solid white;"></div>
+        </div>`,
+        iconSize: [44, 44],
+        iconAnchor: [22, 22],
       })}
     >
-      <Tooltip direction="top" offset={[0, -20]} opacity={1}>
-        <span className="text-xs font-semibold" style={{ fontFamily: "sans-serif" }}>المستودع</span>
+      <Tooltip direction="top" offset={[0, -26]} opacity={1}>
+        <div style={{ fontFamily: "sans-serif", textAlign: "right", direction: "rtl" }}>
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+            <span className="text-xs font-bold text-gray-900 dark:text-white">{name}</span>
+          </div>
+          <div className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">المخزن الأساسي</div>
+        </div>
       </Tooltip>
     </Marker>
   );
@@ -384,54 +413,78 @@ function RouteCard({
     [plan]
   );
 
+  const initials = (plan.driverName || "س")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
+
   return (
     <button
       onClick={onSelect}
-      className="w-full text-right rounded-xl transition-all duration-200"
+      className={`w-full text-right rounded-xl transition-all duration-200 group relative ${
+        isSelected ? "shadow-md" : "hover:shadow-sm"
+      }`}
       style={{
-        background: isSelected ? `${color}10` : "transparent",
-        border: isSelected ? `1.5px solid ${color}40` : "1.5px solid transparent",
+        background: isSelected ? `${color}0f` : "transparent",
+        border: isSelected ? `1.5px solid ${color}55` : "1.5px solid transparent",
       }}
     >
+      {isSelected && (
+        <span
+          className="absolute inset-y-2 right-0 w-1 rounded-full"
+          style={{ background: color }}
+        />
+      )}
       <div className="px-3 py-3">
         {/* Header row */}
         <div className="flex items-center gap-2.5 mb-2">
           <div
-            className="flex items-center justify-center rounded-lg"
-            style={{ width: 28, height: 28, background: color }}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-[11px] font-bold text-white ring-2 ring-white/70 dark:ring-white/10"
+            style={{ background: color }}
           >
-            <span className="text-white text-xs font-bold" style={{ fontFamily: "sans-serif" }}>
-              {driverIndex + 1}
-            </span>
+            {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold text-gray-900 dark:text-white truncate" style={{ fontFamily: "sans-serif" }}>
-              {plan.driverName}
+            <div className="flex items-center gap-1.5">
+              <span className="truncate text-[13px] font-semibold text-gray-900 dark:text-white">
+                {plan.driverName}
+              </span>
+              {isSelected && (
+                <svg className="shrink-0 text-emerald-500" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              )}
             </div>
-            <div className="text-[10px] text-gray-400 dark:text-gray-500" style={{ fontFamily: "sans-serif" }}>
-              {plan.planReference}
+            <div className="truncate text-[11px] text-gray-400 dark:text-gray-500">
+              {plan.planReference || `خطة ${driverIndex + 1}`}
             </div>
           </div>
+          <span
+            className="rounded-md px-1.5 py-0.5 text-[10px] font-bold text-white"
+            style={{ background: color }}
+          >
+            {driverIndex + 1}
+          </span>
         </div>
 
         {/* Stats row */}
-        <div className="flex items-center gap-3 text-[10px] text-gray-500 dark:text-gray-400" style={{ fontFamily: "sans-serif" }}>
-          <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
+          <div className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-gray-50 px-2 py-1.5 text-[10px] font-medium text-gray-600 dark:bg-white/[0.03] dark:text-gray-300">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
               <circle cx="9" cy="7" r="4" />
             </svg>
-            <span>{plan.stops.length} نقطة</span>
+            {plan.stops.length} نقطة
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-gray-50 px-2 py-1.5 text-[10px] font-medium text-gray-600 dark:bg-white/[0.03] dark:text-gray-300">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="10" />
               <polyline points="12,6 12,12 16,14" />
             </svg>
-            <span>{plan.warehouseName}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span>{totalDist.toFixed(1)} km</span>
+            {totalDist.toFixed(1)} كم
           </div>
         </div>
       </div>
@@ -447,6 +500,14 @@ function TrackingMapInner({ drivers, plans }: Props) {
   const [fullscreen, setFullscreen] = useState(false);
   const [useOrs, setUseOrs] = useState(false);
   const mapRef = useRef<HTMLDivElement>(null);
+  const didDefaultFocus = useRef(false);
+
+  useEffect(() => {
+    if (didDefaultFocus.current) return;
+    if (plans.length === 0) return;
+    didDefaultFocus.current = true;
+    setSelectedPlanId(plans[0].planId);
+  }, [plans]);
 
   const activeTile = TILE_MODES.find((t) => t.id === tileMode) ?? TILE_MODES[0];
 
@@ -531,6 +592,23 @@ function TrackingMapInner({ drivers, plans }: Props) {
     return { plans: plansWithSortedStops.length, stops, dist };
   }, [plansWithSortedStops]);
 
+  const mainWarehouse = useMemo(() => {
+    if (plansWithSortedStops.length === 0) return null;
+    const nameCount = new Map<string, number>();
+    for (const p of plansWithSortedStops) {
+      const n = p.warehouseName?.trim();
+      if (n) nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
+    }
+    let dominantName = "";
+    let maxCount = 0;
+    for (const [n, c] of nameCount) {
+      if (c > maxCount) { maxCount = c; dominantName = n; }
+    }
+    const lat = plansWithSortedStops.reduce((sum, p) => sum + p.warehouseLatitude, 0) / plansWithSortedStops.length;
+    const lng = plansWithSortedStops.reduce((sum, p) => sum + p.warehouseLongitude, 0) / plansWithSortedStops.length;
+    return { latitude: lat, longitude: lng, name: dominantName || "المخزن الرئيسي" };
+  }, [plansWithSortedStops]);
+
   if (allCoords.length === 0) {
     return (
       <div className="flex h-80 items-center justify-center rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900/60 dark:to-gray-800/60 text-sm text-gray-400 dark:text-gray-500">
@@ -591,17 +669,32 @@ function TrackingMapInner({ drivers, plans }: Props) {
         </div>
 
         {/* Clear filter */}
-        {selectedPlanId && (
-          <div className="p-3 border-t border-gray-100 dark:border-gray-800">
+        <div className="p-3 border-t border-gray-100 dark:border-gray-800">
+          <div className="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-white/[0.04]">
             <button
               onClick={() => setSelectedPlanId(null)}
-              className="w-full text-center text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 py-2 rounded-lg hover:bg-brand-25 dark:hover:bg-white/[0.02] transition-colors"
+              className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                !selectedPlanId
+                  ? "bg-white text-gray-900 shadow-sm dark:bg-white/[0.08] dark:text-white"
+                  : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              }`}
               style={{ fontFamily: "sans-serif" }}
             >
-              عرض جميع الخطط
+              عرض الكل
+            </button>
+            <button
+              onClick={() => selectedPlanId && setSelectedPlanId(plansWithSortedStops[0]?.planId ?? null)}
+              className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                selectedPlanId
+                  ? "bg-white text-gray-900 shadow-sm dark:bg-white/[0.08] dark:text-white"
+                  : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              }`}
+              style={{ fontFamily: "sans-serif" }}
+            >
+              خطة واحدة
             </button>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Map */}
@@ -638,19 +731,14 @@ function TrackingMapInner({ drivers, plans }: Props) {
             );
           })}
 
-          {/* Warehouse markers */}
-          {filteredPlans.map((plan) => {
-            const idx = driverIndexMap.get(plan.driverId) ?? 0;
-            const color = driverColor(idx);
-            return (
-              <WarehouseMarker
-                key={`wh-${plan.planId}`}
-                latitude={plan.warehouseLatitude}
-                longitude={plan.warehouseLongitude}
-                color={color}
-              />
-            );
-          })}
+          {/* Main warehouse marker */}
+          {mainWarehouse ? (
+            <WarehouseMarker
+              latitude={mainWarehouse.latitude}
+              longitude={mainWarehouse.longitude}
+              name={mainWarehouse.name}
+            />
+          ) : null}
 
           {/* Stop markers */}
           {filteredPlans.map((plan) => {
@@ -674,11 +762,11 @@ function TrackingMapInner({ drivers, plans }: Props) {
             const color = driverColor(idx);
             const icon = L.divIcon({
               className: "",
-              html: driverIconHtml(color),
+              html: driverIconHtml(color, d.headingDegrees),
               iconSize: [32, 32],
               iconAnchor: [16, 16],
             });
-            return <DriverMarker key={d.driverId} driver={d} icon={icon} />;
+            return <DriverMarker key={d.driverId} driver={d} icon={icon} color={color} />;
           })}
         </MapContainer>
 
@@ -803,13 +891,50 @@ function TrackingMapInner({ drivers, plans }: Props) {
   );
 }
 
-function DriverMarker({ driver, icon }: { driver: MapDriverLocation; icon: DivIcon }) {
+function DriverMarker({
+  driver,
+  icon,
+  color,
+}: {
+  driver: MapDriverLocation;
+  icon: DivIcon;
+  color: string;
+}) {
+  const hasHeading = typeof driver.headingDegrees === "number" && Number.isFinite(driver.headingDegrees);
   return (
     <Marker position={[driver.latitude, driver.longitude]} icon={icon}>
       <Tooltip direction="top" offset={[0, -18]} opacity={1}>
-        <span className="text-xs font-semibold whitespace-nowrap" style={{ fontFamily: "sans-serif" }}>
-          {driver.driverName}
-        </span>
+        <div
+          style={{
+            fontFamily: "sans-serif",
+            textAlign: "right",
+            direction: "rtl",
+            minWidth: 120,
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <span
+              className="inline-block h-2.5 w-2.5 rounded-full"
+              style={{ background: color }}
+            />
+            <span className="text-xs font-bold text-gray-900 dark:text-white">{driver.driverName}</span>
+          </div>
+          <div className="mt-1 flex items-center gap-3 text-[10px] text-gray-500 dark:text-gray-400">
+            {hasHeading ? (
+              <span className="flex items-center gap-1">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 14c4 2 6 4 8 6" />
+                  <path d="M20 4c-6 2-10 6-12 12" />
+                  <circle cx="4" cy="14" r="2" />
+                  <circle cx="20" cy="4" r="2" />
+                </svg>
+                {Math.round(driver.headingDegrees as number)}° ضلع
+              </span>
+            ) : (
+              <span>موقع مباشر</span>
+            )}
+          </div>
+        </div>
       </Tooltip>
     </Marker>
   );

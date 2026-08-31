@@ -12,26 +12,16 @@ type Props = {
   refetchInterval?: number;
 };
 
-const DEFAULT_RANGE_DAYS = 30;
 const DEFAULT_REFETCH_INTERVAL = 10000;
 
-function lastNDayRange(days: number): { startISO: string; endISO: string } {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - days, 0, 0, 0, 0);
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-  return { startISO: start.toISOString(), endISO: end.toISOString() };
-}
-
-async function fetchLiveMapData(startISO: string, endISO: string) {
-  const startDay = startISO.slice(0, 10);
-  const endDay = endISO.slice(0, 10);
+async function fetchLiveMapData() {
+  const today = new Date().toISOString().slice(0, 10);
 
   const { data: plans, error: plansErr } = await supabase
     .from("logistics_delivery_plans")
     .select("id, plan_reference, assigned_profile_id, planned_date, plan_status")
     .in("plan_status", ["pending", "in_progress"])
-    .gte("planned_date", startDay)
-    .lte("planned_date", endDay);
+    .eq("planned_date", today);
   if (plansErr) throw plansErr;
 
   const planDriverIds = [
@@ -168,10 +158,9 @@ export default function LiveTrackingMapSection({
   className = "",
   refetchInterval = DEFAULT_REFETCH_INTERVAL,
 }: Props) {
-  const { startISO, endISO } = lastNDayRange(DEFAULT_RANGE_DAYS);
   const { data, isLoading } = useQuery({
-    queryKey: ["logistics", "live-map", startISO, endISO],
-    queryFn: () => fetchLiveMapData(startISO, endISO),
+    queryKey: ["logistics", "live-map", "today"],
+    queryFn: () => fetchLiveMapData(),
     refetchInterval,
   });
 

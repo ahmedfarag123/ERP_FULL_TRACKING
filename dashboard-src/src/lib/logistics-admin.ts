@@ -123,6 +123,48 @@ export interface LogisticsDashboardData {
   activities: LogisticsActivity[];
 }
 
+export interface PlanCompletionRow {
+  planId: string;
+  planReference: string;
+  plannedDate: string;
+  planStatus: string;
+  driverId: string | null;
+  driverName: string | null;
+  total: number;
+  delivered: number;
+  returned: number;
+  cancelled: number;
+  open: number;
+  pct: number;
+  complete: boolean;
+  overdue: boolean;
+}
+
+export interface DriverCompletionStats {
+  driverId: string | null;
+  driverName: string;
+  completedPlans: number;
+  incompletePlans: number;
+  deliveredOrders: number;
+  returnedOrders: number;
+  undeliveredOrders: number;
+  totalPlans: number;
+}
+
+export interface PlanCompletionReport {
+  plans: PlanCompletionRow[];
+  drivers: DriverCompletionStats[];
+  totals: {
+    plans: number;
+    completedPlans: number;
+    incompletePlans: number;
+    deliveredOrders: number;
+    returnedOrders: number;
+    undeliveredOrders: number;
+    overallPct: number;
+  };
+}
+
 const PLAN_SELECT = `
   id,
   plan_reference,
@@ -476,6 +518,136 @@ export async function fetchLogisticsDashboard(): Promise<LogisticsDashboardData>
   }));
 
   return { plans, shipments, drivers, activities };
+}
+
+const COMPLETED_SHIPMENT_STATUSES = new Set(["DELIVERED", "FINISHED", "SETTLED"]);
+const CANCELLED_SHIPMENT_STATUSES = new Set(["CANCELLED"]);
+const OPEN_SHIPMENT_STATUSES = new Set(["PENDING_ASSIGN", "ASSIGNED", "CHECK_IN", "PICKUP", "OUT_FOR_DELIVERY", "ARRIVED"]);
+
+export async function fetchPlanCompletionReport(fromDays = 30): Promise<PlanCompletionReport> {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - fromDays, 0, 0, 0, 0).toISOString();
+  const today = now.toISOString().slice(0, 10);
+
+  const [{ data: plans, error: plansErr }, { data: shipments, error: shipErr }, { data: profiles }] =
+    await Promise.all([
+      supabase.from("logistics_delivery_plans").select("id, plan_reference, assigned_profile_id, planned_date, plan_status").gte("planned_date", start.slice(0, 10)),
+      supabase.from("logistics_shipments").select("plan_id, shipment_status, is_return_shipment"),
+      supabase.from("profiles").select("id, full_name"),
+    ]);
+  if (plansErr) throw plansErr;
+  if (shipErr) throw shipErr;
+
+  const profileNameById = new Map<string, string>(
+    (profiles ?? []).map((row: any) => [String(row.id), String(row.full_name ?? "سائق")]),
+  );
+
+  const shipmentsByPlan = new Map<string, Array<Record<string, any>>>();
+  for (const s of shipments ?? []) {
+    if (!s.plan_id) continue;
+    const list = shipmentsByPlan.get(s.plan_id) ?? [];
+    list.push(s);
+    shipmentsByPlan.set(s.plan_id, list);
+  }
+
+  const rows: PlanCompletionRow[] = [];
+  for (const plan of plans ?? []) {
+    const planShipments = shipmentsByPlan.get(plan.id) ?? [];
+    let delivered = 0;
+    let returned = 0;
+    let cancelled = 0;
+    let open = 0;
+    for (const s of planShipments) {
+      const status = String(s.shipment_status ?? "");
+      if (s.is_return_shipment) {
+        returned += 1;
+      } else if (COMPLETED_SHIPMENT_STATUSES.has(status)) {
+        delivered += 1;
+      } else if (CANCELLED_SHIPMENT_STATUSES.has(status)) {
+        cancelled += 1;
+      } else if (OPEN_SHIPMENT_STATUSES.has(status)) {
+        open += 1;
+      } else {
+        open += 1;
+      }
+    }
+    const total = planShipments.length;
+    if (total === 0) continue;
+    const driverId = plan.assigned_profile_id ? String(plan.assigned_profile_id) : null;
+    const plannedDate = dateOnly(plan.planned_date);
+    const complete = open === 0 && returned === 0;
+    const overdue = Boolean(plannedDate && plannedDate < today && !complete);
+    rows.push({
+      planId: String(plan.id),
+      planReference: String(plan.plan_reference ?? plan.id),
+      plannedDate: plannedDate ?? "",
+      planStatus: String(plan.plan_status ?? ""),
+      driverId,
+      driverName: driverId ? profileNameById.get(driverId) ?? "سائق" : "غير معين",
+      total,
+      delivered,
+      returned,
+      cancelled,
+      open,
+      pct: Math.round((delivered / total) * 100),
+      complete,
+      overdue,
+    });
+  }
+
+  rows.sort((a, b) => b.plannedDate.localeCompare(a.plannedDate) || (a.driverName ?? "").localeCompare(b.driverName ?? "", "ar"));
+
+  const driverAgg = new Map<string, DriverCompletionStats>();
+  const addDriver = (driverId: string | null, driverName: string) => {
+    const key = driverId ?? `unassigned-${driverName}`;
+    let entry = driverAgg.get(key);
+    if (!entry) {
+      entry = {
+        driverId,
+        driverName,
+        completedPlans: 0,
+        incompletePlans: 0,
+        deliveredOrders: 0,
+        returnedOrders: 0,
+        undeliveredOrders: 0,
+        totalPlans: 0,
+      };
+      driverAgg.set(key, entry);
+    }
+    return entry;
+  };
+
+  for (const r of rows) {
+    addDriver(r.driverId, r.driverName ?? "سائق");
+    const entry = driverAgg.get(r.driverId ?? `unassigned-${r.driverName}`)!;
+    entry.totalPlans += 1;
+    entry.deliveredOrders += r.delivered;
+    entry.returnedOrders += r.returned;
+    entry.undeliveredOrders += r.open;
+    if (r.complete) entry.completedPlans += 1;
+    if (r.overdue) entry.incompletePlans += 1;
+  }
+
+  const driversArr = [...driverAgg.values()].sort((a, b) => b.undeliveredOrders - a.undeliveredOrders);
+
+  const totalDelivered = rows.reduce((s, r) => s + r.delivered, 0);
+  const totalReturned = rows.reduce((s, r) => s + r.returned, 0);
+  const totalUndelivered = rows.reduce((s, r) => s + r.open, 0);
+  const totalAll = rows.reduce((s, r) => s + r.total, 0);
+
+  return {
+    plans: rows,
+    drivers: driversArr,
+    totals: {
+      plans: rows.length,
+      completedPlans: rows.filter((r) => r.complete).length,
+      incompletePlans: rows.filter((r) => r.overdue).length,
+      deliveredOrders: totalDelivered,
+      returnedOrders: totalReturned,
+      undeliveredOrders: totalUndelivered,
+      overallPct: totalAll ? Math.round((totalDelivered / totalAll) * 100) : 0,
+    },
+  };
 }
 
 export async function fetchShipmentCandidates(range: DateRangeValue): Promise<ShipmentCandidate[]> {

@@ -25,6 +25,7 @@ import {
 } from "@heroicons/react/24/outline";
 import PageMeta from "../../../components/common/PageMeta";
 import LiveTrackingMapSection from "../../../components/admin/LiveTrackingMapSection";
+import PlanCompletionSection from "../../../components/admin/PlanCompletionSection";
 import DateRangePicker from "../../../components/form/date-range-picker";
 import { AdminEmptyState, AdminMetricCard, AdminMetricGrid, AdminPageFrame, AdminPageHero, AdminSection } from "../../../components/admin/AdminPageElements";
 import CustomerAvatar from "../../../components/ui/CustomerAvatar";
@@ -663,6 +664,7 @@ export function LogisticsOverviewPage() {
           <AdminMetricCard label="نسبة التسليم" value={`${shipments.length ? Math.round((delivered / shipments.length) * 100) : 0}%`} helper="من إجمالي الشحنات" tone="emerald" />
         </AdminMetricGrid>
         <LiveTrackingMapSection className="mt-6" />
+        <PlanCompletionSection className="mt-6" />
         <div className="mt-6 grid grid-cols-1 gap-6 2xl:grid-cols-[1.4fr_0.8fr]">
           <DriverOverviewTable drivers={drivers} isLoading={isLoading} />
           <RecentActivity activities={data?.activities ?? []} />

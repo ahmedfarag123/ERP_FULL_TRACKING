@@ -393,27 +393,28 @@ function StopMarker({
   );
 }
 
-// ─── Route Card in Sidebar ───────────────────────────────────────────────────
+// ─── Driver Card in Sidebar ──────────────────────────────────────────────────
 
-function RouteCard({
-  plan,
+function DriverCard({
+  driver,
   color,
   isSelected,
   onSelect,
   driverIndex,
 }: {
-  plan: MapPlanRoute;
+  driver: {
+    driverId: string;
+    driverName: string;
+    plans: { planId: string; planReference: string; stops: MapShipmentStop[]; warehouseName: string }[];
+    totalStops: number;
+    totalDist: number;
+  };
   color: string;
   isSelected: boolean;
   onSelect: () => void;
   driverIndex: number;
 }) {
-  const totalDist = useMemo(
-    () => computeTotalDistanceKm(plan.stops, { lat: plan.warehouseLatitude, lng: plan.warehouseLongitude }),
-    [plan]
-  );
-
-  const initials = (plan.driverName || "س")
+  const initials = (driver.driverName || "س")
     .split(" ")
     .filter(Boolean)
     .slice(0, 2)
@@ -442,7 +443,7 @@ function RouteCard({
         {/* Header row */}
         <div className="flex items-center gap-2.5 mb-2">
           <div
-            className="flex h-9 w-9 items-center justify-center rounded-full text-[11px] font-bold text-white ring-2 ring-white/70 dark:ring-white/10"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-[11px] font-bold text-white ring-2 ring-white/70 dark:ring-white/10 shrink-0"
             style={{ background: color }}
           >
             {initials}
@@ -450,7 +451,7 @@ function RouteCard({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="truncate text-[13px] font-semibold text-gray-900 dark:text-white">
-                {plan.driverName}
+                {driver.driverName}
               </span>
               {isSelected && (
                 <svg className="shrink-0 text-emerald-500" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -458,12 +459,23 @@ function RouteCard({
                 </svg>
               )}
             </div>
-            <div className="truncate text-[11px] text-gray-400 dark:text-gray-500">
-              {plan.planReference || `خطة ${driverIndex + 1}`}
+            <div className="flex items-center gap-1.5 mt-0.5">
+              {driver.plans.length > 1 && (
+                <span
+                  className="rounded px-1 py-px text-[9px] font-bold text-white leading-tight"
+                  style={{ background: color }}
+                >
+                  {driver.plans.length} خطط
+                </span>
+              )}
+              <span className="truncate text-[11px] text-gray-400 dark:text-gray-500">
+                {driver.plans[0]?.planReference || `خطة ${driverIndex + 1}`}
+                {driver.plans.length > 1 ? ` +${driver.plans.length - 1}` : ""}
+              </span>
             </div>
           </div>
           <span
-            className="rounded-md px-1.5 py-0.5 text-[10px] font-bold text-white"
+            className="rounded-md px-1.5 py-0.5 text-[10px] font-bold text-white shrink-0"
             style={{ background: color }}
           >
             {driverIndex + 1}
@@ -477,14 +489,14 @@ function RouteCard({
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
               <circle cx="9" cy="7" r="4" />
             </svg>
-            {plan.stops.length} نقطة
+            {driver.totalStops} نقطة
           </div>
           <div className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-gray-50 px-2 py-1.5 text-[10px] font-medium text-gray-600 dark:bg-white/[0.03] dark:text-gray-300">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="10" />
               <polyline points="12,6 12,12 16,14" />
             </svg>
-            {totalDist.toFixed(1)} كم
+            {driver.totalDist.toFixed(1)} كم
           </div>
         </div>
       </div>
@@ -495,19 +507,12 @@ function RouteCard({
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 function TrackingMapInner({ drivers, plans }: Props) {
-  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
   const [tileMode, setTileMode] = useState<MapTileMode>("map");
   const [fullscreen, setFullscreen] = useState(false);
   const [useOrs, setUseOrs] = useState(false);
   const mapRef = useRef<HTMLDivElement>(null);
   const didDefaultFocus = useRef(false);
-
-  useEffect(() => {
-    if (didDefaultFocus.current) return;
-    if (plans.length === 0) return;
-    didDefaultFocus.current = true;
-    setSelectedPlanId(plans[0].planId);
-  }, [plans]);
 
   const activeTile = TILE_MODES.find((t) => t.id === tileMode) ?? TILE_MODES[0];
 
@@ -542,30 +547,58 @@ function TrackingMapInner({ drivers, plans }: Props) {
     [plans]
   );
 
-  const filteredPlans = useMemo(
-    () =>
-      selectedPlanId
-        ? plansWithSortedStops.filter((p) => p.planId === selectedPlanId)
-        : plansWithSortedStops,
-    [plansWithSortedStops, selectedPlanId]
-  );
-
-  const filteredDrivers = useMemo(
-    () => (selectedPlanId ? drivers.filter((d) => d.driverId === filteredPlans[0]?.driverId) : drivers),
-    [drivers, selectedPlanId, filteredPlans]
-  );
-
   const driverIndexMap = useMemo(() => {
     const map = new Map<string, number>();
     drivers.forEach((d, i) => map.set(d.driverId, i));
     return map;
   }, [drivers]);
 
-  const planIndexMap = useMemo(() => {
-    const map = new Map<string, number>();
-    plansWithSortedStops.forEach((p, i) => map.set(p.planId, i));
-    return map;
+  type DriverWithPlans = {
+    driverId: string;
+    driverName: string;
+    plans: typeof plansWithSortedStops;
+    totalStops: number;
+    totalDist: number;
+  };
+
+  const driversWithPlans: DriverWithPlans[] = useMemo(() => {
+    const map = new Map<string, DriverWithPlans>();
+    for (const plan of plansWithSortedStops) {
+      let entry = map.get(plan.driverId);
+      if (!entry) {
+        entry = { driverId: plan.driverId, driverName: plan.driverName, plans: [], totalStops: 0, totalDist: 0 };
+        map.set(plan.driverId, entry);
+      }
+      entry.plans.push(plan);
+      entry.totalStops += plan.stops.length;
+      entry.totalDist += computeTotalDistanceKm(plan.stops, { lat: plan.warehouseLatitude, lng: plan.warehouseLongitude });
+    }
+    return [...map.values()];
   }, [plansWithSortedStops]);
+
+  useEffect(() => {
+    if (didDefaultFocus.current) return;
+    if (driversWithPlans.length === 0) return;
+    didDefaultFocus.current = true;
+    setSelectedDriverId(driversWithPlans[0].driverId);
+  }, [driversWithPlans]);
+
+  const filteredPlans = useMemo(
+    () =>
+      selectedDriverId
+        ? plansWithSortedStops.filter((p) => p.driverId === selectedDriverId)
+        : plansWithSortedStops,
+    [plansWithSortedStops, selectedDriverId]
+  );
+
+  const filteredDrivers = useMemo(
+    () => (selectedDriverId ? drivers.filter((d) => d.driverId === selectedDriverId) : drivers),
+    [drivers, selectedDriverId]
+  );
+
+  const handleSelectDriver = useCallback((driverId: string) => {
+    setSelectedDriverId((prev) => (prev === driverId ? null : driverId));
+  }, []);
 
   const allCoords = useMemo(() => {
     const pts: LatLngExpression[] = [];
@@ -579,18 +612,11 @@ function TrackingMapInner({ drivers, plans }: Props) {
 
   const bounds = allCoords.length > 0 ? (allCoords as LatLngBoundsExpression) : undefined;
 
-  const handleSelectPlan = useCallback((planId: string) => {
-    setSelectedPlanId((prev) => (prev === planId ? null : planId));
-  }, []);
-
   const totalStats = useMemo(() => {
-    const stops = plansWithSortedStops.reduce((sum, p) => sum + p.stops.length, 0);
-    const dist = plansWithSortedStops.reduce(
-      (sum, p) => sum + computeTotalDistanceKm(p.stops, { lat: p.warehouseLatitude, lng: p.warehouseLongitude }),
-      0
-    );
-    return { plans: plansWithSortedStops.length, stops, dist };
-  }, [plansWithSortedStops]);
+    const stops = driversWithPlans.reduce((sum, d) => sum + d.totalStops, 0);
+    const dist = driversWithPlans.reduce((sum, d) => sum + d.totalDist, 0);
+    return { drivers: driversWithPlans.length, plans: plansWithSortedStops.length, stops, dist };
+  }, [driversWithPlans, plansWithSortedStops]);
 
   const mainWarehouse = useMemo(() => {
     if (plansWithSortedStops.length === 0) return null;
@@ -634,47 +660,47 @@ function TrackingMapInner({ drivers, plans }: Props) {
         <div className="px-4 pt-4 pb-3 border-b border-gray-100 dark:border-gray-800">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-sm font-bold text-gray-900 dark:text-white" style={{ fontFamily: "sans-serif" }}>
-              خطط التوصيل
+              السائقون
             </h3>
             <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 bg-brand-25 dark:bg-white/[0.02] px-2 py-0.5 rounded-full" style={{ fontFamily: "sans-serif" }}>
-              {totalStats.plans} خطط
+              {totalStats.drivers} سائق
             </span>
           </div>
           <div className="flex items-center gap-3 text-[10px] text-gray-400 dark:text-gray-500" style={{ fontFamily: "sans-serif" }}>
+            <span>{totalStats.plans} خطط</span>
+            <span>·</span>
             <span>{totalStats.stops} نقطة</span>
             <span>·</span>
-            <span>{totalStats.dist.toFixed(0)} km</span>
-            <span>·</span>
-            <span>{drivers.length} سائق</span>
+            <span>{totalStats.dist.toFixed(0)} كم</span>
           </div>
         </div>
 
-        {/* Route Cards */}
+        {/* Driver Cards */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {plansWithSortedStops.map((plan) => {
-            const idx = driverIndexMap.get(plan.driverId) ?? 0;
+          {driversWithPlans.map((dp) => {
+            const idx = driverIndexMap.get(dp.driverId) ?? 0;
             const color = driverColor(idx);
-            const isSelected = selectedPlanId === plan.planId;
+            const isSelected = selectedDriverId === dp.driverId;
             return (
-              <RouteCard
-                key={plan.planId}
-                plan={plan}
+              <DriverCard
+                key={dp.driverId}
+                driver={dp}
                 color={color}
                 isSelected={isSelected}
-                onSelect={() => handleSelectPlan(plan.planId)}
+                onSelect={() => handleSelectDriver(dp.driverId)}
                 driverIndex={idx}
               />
             );
           })}
         </div>
 
-        {/* Clear filter */}
+        {/* Toggle */}
         <div className="p-3 border-t border-gray-100 dark:border-gray-800">
           <div className="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-white/[0.04]">
             <button
-              onClick={() => setSelectedPlanId(null)}
+              onClick={() => setSelectedDriverId(null)}
               className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors ${
-                !selectedPlanId
+                !selectedDriverId
                   ? "bg-white text-gray-900 shadow-sm dark:bg-white/[0.08] dark:text-white"
                   : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
               }`}
@@ -683,15 +709,19 @@ function TrackingMapInner({ drivers, plans }: Props) {
               عرض الكل
             </button>
             <button
-              onClick={() => selectedPlanId && setSelectedPlanId(plansWithSortedStops[0]?.planId ?? null)}
+              onClick={() => {
+                if (!selectedDriverId && driversWithPlans.length > 0) {
+                  setSelectedDriverId(driversWithPlans[0].driverId);
+                }
+              }}
               className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors ${
-                selectedPlanId
+                selectedDriverId
                   ? "bg-white text-gray-900 shadow-sm dark:bg-white/[0.08] dark:text-white"
                   : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
               }`}
               style={{ fontFamily: "sans-serif" }}
             >
-              خطة واحدة
+              سائق واحد
             </button>
           </div>
         </div>
@@ -724,9 +754,9 @@ function TrackingMapInner({ drivers, plans }: Props) {
                 color={color}
                 warehouseLatitude={plan.warehouseLatitude}
                 warehouseLongitude={plan.warehouseLongitude}
-                isActive={!selectedPlanId || selectedPlanId === plan.planId}
+                isActive
                 useOrs={useOrs}
-                onClick={() => handleSelectPlan(plan.planId)}
+                onClick={() => handleSelectDriver(plan.driverId)}
               />
             );
           })}
@@ -744,14 +774,13 @@ function TrackingMapInner({ drivers, plans }: Props) {
           {filteredPlans.map((plan) => {
             const idx = driverIndexMap.get(plan.driverId) ?? 0;
             const color = driverColor(idx);
-            const isActive = !selectedPlanId || selectedPlanId === plan.planId;
             return plan.stops.map((stop, sIdx) => (
               <StopMarker
                 key={`${plan.planId}-${stop.id}`}
                 stop={stop}
                 idx={sIdx}
                 color={color}
-                isActive={isActive}
+                isActive={true}
               />
             ));
           })}
@@ -837,13 +866,12 @@ function TrackingMapInner({ drivers, plans }: Props) {
               <span className="inline-block h-3 w-3 rounded bg-gradient-to-br from-gray-500 to-gray-700" />
               المستودع
             </span>
-            {filteredPlans.map((plan) => {
-              const idx = driverIndexMap.get(plan.driverId) ?? 0;
+            {(selectedDriverId ? driversWithPlans.filter((dp) => dp.driverId === selectedDriverId) : driversWithPlans).map((dp) => {
+              const idx = driverIndexMap.get(dp.driverId) ?? 0;
               const color = driverColor(idx);
-              const planIdx = planIndexMap.get(plan.planId) ?? 0;
               return (
                 <span
-                  key={plan.planId}
+                  key={dp.driverId}
                   className="inline-flex items-center gap-1.5 text-[10px] font-medium text-gray-600 dark:text-gray-300"
                   style={{ fontFamily: "sans-serif" }}
                 >
@@ -851,22 +879,21 @@ function TrackingMapInner({ drivers, plans }: Props) {
                     className="inline-block h-2.5 w-2.5 rounded-full"
                     style={{ background: color }}
                   />
-                  {plan.driverName}
+                  {dp.driverName}
                 </span>
               );
             })}
           </div>
         </div>
 
-        {/* Route Info Popup */}
-        {selectedPlanId && (
+        {/* Driver Info Popup */}
+        {selectedDriverId && (
           <div className="absolute top-3 left-3 z-[1000] bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm rounded-xl px-4 py-3 shadow-lg border border-gray-200/50 dark:border-gray-700/50 max-w-xs">
             {(() => {
-              const plan = plansWithSortedStops.find((p) => p.planId === selectedPlanId);
-              if (!plan) return null;
-              const idx = driverIndexMap.get(plan.driverId) ?? 0;
+              const dp = driversWithPlans.find((d) => d.driverId === selectedDriverId);
+              if (!dp) return null;
+              const idx = driverIndexMap.get(dp.driverId) ?? 0;
               const color = driverColor(idx);
-              const dist = computeTotalDistanceKm(plan.stops, { lat: plan.warehouseLatitude, lng: plan.warehouseLongitude });
               return (
                 <div style={{ fontFamily: "sans-serif" }}>
                   <div className="flex items-center gap-2 mb-2">
@@ -874,12 +901,12 @@ function TrackingMapInner({ drivers, plans }: Props) {
                       className="w-3 h-3 rounded-full"
                       style={{ background: color }}
                     />
-                    <span className="text-xs font-bold text-gray-900 dark:text-white">{plan.driverName}</span>
+                    <span className="text-xs font-bold text-gray-900 dark:text-white">{dp.driverName}</span>
                   </div>
                   <div className="flex items-center gap-4 text-[10px] text-gray-500 dark:text-gray-400">
-                    <span>{plan.stops.length} نقطة</span>
-                    <span>~{dist.toFixed(1)} km</span>
-                    <span>{plan.warehouseName}</span>
+                    <span>{dp.plans.length} خطة{dp.plans.length !== 1 ? "ط" : ""}</span>
+                    <span>{dp.totalStops} نقطة</span>
+                    <span>{dp.totalDist.toFixed(1)} كم</span>
                   </div>
                 </div>
               );

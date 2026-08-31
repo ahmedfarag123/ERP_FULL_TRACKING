@@ -24,6 +24,7 @@ import {
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
 import PageMeta from "../../../components/common/PageMeta";
+import LiveTrackingMapSection from "../../../components/admin/LiveTrackingMapSection";
 import DateRangePicker from "../../../components/form/date-range-picker";
 import { AdminEmptyState, AdminMetricCard, AdminMetricGrid, AdminPageFrame, AdminPageHero, AdminSection } from "../../../components/admin/AdminPageElements";
 import CustomerAvatar from "../../../components/ui/CustomerAvatar";
@@ -661,7 +662,8 @@ export function LogisticsOverviewPage() {
           <AdminMetricCard label="غير مخططة" value={shipments.filter((shipment) => !shipment.planId && !["DELIVERED", "FINISHED", "SETTLED", "CANCELLED"].includes(shipment.status)).length} helper="تحتاج خطة أو سائق" tone="amber" />
           <AdminMetricCard label="نسبة التسليم" value={`${shipments.length ? Math.round((delivered / shipments.length) * 100) : 0}%`} helper="من إجمالي الشحنات" tone="emerald" />
         </AdminMetricGrid>
-        <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[1.4fr_0.8fr]">
+        <LiveTrackingMapSection className="mt-6" />
+        <div className="mt-6 grid grid-cols-1 gap-6 2xl:grid-cols-[1.4fr_0.8fr]">
           <DriverOverviewTable drivers={drivers} isLoading={isLoading} />
           <RecentActivity activities={data?.activities ?? []} />
         </div>

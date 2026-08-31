@@ -123,6 +123,15 @@ export interface LogisticsDashboardData {
   activities: LogisticsActivity[];
 }
 
+export interface ReturnedShipmentInfo {
+  shipmentId: string;
+  reference: string | null;
+  confirmed: boolean;
+  confirmedBy: string | null;
+  confirmedAt: string | null;
+  note: string | null;
+}
+
 export interface PlanCompletionRow {
   planId: string;
   planReference: string;
@@ -138,6 +147,7 @@ export interface PlanCompletionRow {
   pct: number;
   complete: boolean;
   overdue: boolean;
+  returnedShipments: ReturnedShipmentInfo[];
 }
 
 export interface DriverCompletionStats {
@@ -391,12 +401,49 @@ export async function fetchPlanDetails(planId: string) {
     fetchLogisticsDrivers(),
   ]);
   const items = await fetchPlanItems(planShipments.map((shipment) => shipment.id));
+  const audit = await fetchPlanAuditEvents(planShipments.map((shipment) => shipment.id));
   return {
     plan,
     shipments: planShipments,
     items,
     drivers,
+    audit,
   };
+}
+
+export interface PlanAuditEvent {
+  id: string;
+  shipmentId: string;
+  actorName: string | null;
+  previousPhase: string | null;
+  nextPhase: string | null;
+  note: string | null;
+  createdAt: string | null;
+  isAdminConfirmedDelivery: boolean;
+}
+
+async function fetchPlanAuditEvents(shipmentIds: string[]): Promise<PlanAuditEvent[]> {
+  if (shipmentIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("logistics_shipment_events")
+    .select("id, shipment_id, actor_profile_id_full_name, previous_phase, next_phase, note, created_at, payload")
+    .in("shipment_id", shipmentIds)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error) throw error;
+  return (data ?? []).map((row: any) => {
+    const payload = row.payload && typeof row.payload === "object" ? row.payload : {};
+    return {
+      id: String(row.id),
+      shipmentId: String(row.shipment_id),
+      actorName: row.actor_profile_id_full_name ? String(row.actor_profile_id_full_name) : null,
+      previousPhase: row.previous_phase ? String(row.previous_phase) : null,
+      nextPhase: row.next_phase ? String(row.next_phase) : null,
+      note: row.note ? String(row.note) : null,
+      createdAt: row.created_at ? String(row.created_at) : null,
+      isAdminConfirmedDelivery: payload.review === "admin_confirmed_delivery",
+    };
+  });
 }
 
 function extractInternalRef(productRef: string | null): string {
@@ -529,18 +576,35 @@ export async function fetchPlanCompletionReport(fromDays = 30): Promise<PlanComp
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - fromDays, 0, 0, 0, 0).toISOString();
   const today = now.toISOString().slice(0, 10);
 
-  const [{ data: plans, error: plansErr }, { data: shipments, error: shipErr }, { data: profiles }] =
+  const [{ data: plans, error: plansErr }, { data: shipments, error: shipErr }, { data: profiles }, { data: events, error: eventsErr }] =
     await Promise.all([
       supabase.from("logistics_delivery_plans").select("id, plan_reference, assigned_profile_id, planned_date, plan_status").gte("planned_date", start.slice(0, 10)),
-      supabase.from("logistics_shipments").select("plan_id, shipment_status, is_return_shipment"),
+      supabase.from("logistics_shipments").select("id, shipment_reference, plan_id, shipment_status, is_return_shipment"),
       supabase.from("profiles").select("id, full_name"),
+      supabase
+        .from("logistics_shipment_events")
+        .select("shipment_id, actor_profile_id_full_name, note, created_at, payload")
+        .order("created_at", { ascending: true }),
     ]);
   if (plansErr) throw plansErr;
   if (shipErr) throw shipErr;
+  if (eventsErr) throw eventsErr;
 
   const profileNameById = new Map<string, string>(
     (profiles ?? []).map((row: any) => [String(row.id), String(row.full_name ?? "سائق")]),
   );
+
+  const adminConfirmedByShipment = new Map<string, { confirmedBy: string | null; confirmedAt: string | null; note: string | null }>();
+  for (const ev of events ?? []) {
+    const payload = ev.payload && typeof ev.payload === "object" ? ev.payload : {};
+    if (payload.review !== "admin_confirmed_delivery") continue;
+    const key = String(ev.shipment_id);
+    adminConfirmedByShipment.set(key, {
+      confirmedBy: ev.actor_profile_id_full_name ?? payload.confirmedBy ?? null,
+      confirmedAt: ev.created_at ? String(ev.created_at) : null,
+      note: ev.note ?? payload.faultReason ?? null,
+    });
+  }
 
   const shipmentsByPlan = new Map<string, Array<Record<string, any>>>();
   for (const s of shipments ?? []) {
@@ -557,10 +621,20 @@ export async function fetchPlanCompletionReport(fromDays = 30): Promise<PlanComp
     let returned = 0;
     let cancelled = 0;
     let open = 0;
+    const returnedShipments: ReturnedShipmentInfo[] = [];
     for (const s of planShipments) {
       const status = String(s.shipment_status ?? "");
       if (s.is_return_shipment) {
         returned += 1;
+        const conf = adminConfirmedByShipment.get(String(s.id));
+        returnedShipments.push({
+          shipmentId: String(s.id),
+          reference: s.shipment_reference ? String(s.shipment_reference) : null,
+          confirmed: Boolean(conf),
+          confirmedBy: conf?.confirmedBy ?? null,
+          confirmedAt: conf?.confirmedAt ?? null,
+          note: conf?.note ?? null,
+        });
       } else if (COMPLETED_SHIPMENT_STATUSES.has(status)) {
         delivered += 1;
       } else if (CANCELLED_SHIPMENT_STATUSES.has(status)) {
@@ -592,6 +666,7 @@ export async function fetchPlanCompletionReport(fromDays = 30): Promise<PlanComp
       pct: Math.round((delivered / total) * 100),
       complete,
       overdue,
+      returnedShipments,
     });
   }
 
@@ -1113,6 +1188,15 @@ export async function updateShipmentStatus(
   });
   if (error) throw error;
   return mapShipment(data as Record<string, any>);
+}
+
+export async function confirmDelivery(shipmentId: string, note?: string): Promise<LogisticsShipment> {
+  const { data, error } = await supabase.rpc("admin_confirm_delivery", {
+    p_shipment_id: shipmentId,
+    p_note: note ?? null,
+  });
+  if (error) throw error;
+  return mapShipment((data ?? {}) as Record<string, any>);
 }
 
 export function getValidNextStatuses(currentStatus: string): string[] {

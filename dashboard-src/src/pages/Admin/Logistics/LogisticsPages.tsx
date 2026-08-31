@@ -63,6 +63,7 @@ import {
   type LogisticsPlanItem,
   type LogisticsShipment,
   type ShipmentCandidate,
+  type PlanAuditEvent,
 } from "../../../lib/logistics-admin";
 
 const PAGE_SIZE = 10;
@@ -1284,6 +1285,50 @@ function ShipmentTransferModal({
   );
 }
 
+function PlanAuditSection({ audit, shipments }: { audit: PlanAuditEvent[]; shipments: LogisticsShipment[] }) {
+  const refById = new Map(shipments.map((s) => [s.id, s.reference]));
+  if (audit.length === 0) return null;
+  return (
+    <AdminSection title="سجل التغييرات" description="من غيّر حالة كل شحنة ومتى — يتضمن تأكيدات التسليم من الأدمن.">
+      <div className="max-h-80 space-y-2 overflow-y-auto">
+        {audit.map((ev) => {
+          const ref = refById.get(ev.shipmentId) ?? ev.shipmentId.slice(0, 8);
+          return (
+            <div
+              key={ev.id}
+              className={`flex items-start justify-between gap-3 rounded-lg border px-3 py-2 ${
+                ev.isAdminConfirmedDelivery
+                  ? "border-emerald-200 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10"
+                  : "border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.03]"
+              }`}
+            >
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-gray-800 dark:text-gray-100">
+                  <span dir="ltr">{ref}</span>
+                  {ev.isAdminConfirmedDelivery ? (
+                    <span className="mr-2 font-bold text-emerald-600 dark:text-emerald-400">مسلّم بواسطة الأدمن</span>
+                  ) : (
+                    <span className="mr-2 text-gray-400">
+                      {ev.previousPhase ?? "-"} ← {ev.nextPhase ?? "-"}
+                    </span>
+                  )}
+                </p>
+                <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                  {ev.actorName ?? "غير معروف"}
+                  {ev.note ? <span> • {ev.note}</span> : null}
+                </p>
+              </div>
+              <span className="shrink-0 text-[11px] text-gray-400 dark:text-gray-500">
+                {formatDate(ev.createdAt)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </AdminSection>
+  );
+}
+
 export function LogisticsDraftPlanPage() {
   const { planId = "" } = useParams();
   const queryClient = useQueryClient();
@@ -1292,6 +1337,7 @@ export function LogisticsDraftPlanPage() {
   const shipments = query.data?.shipments ?? [];
   const items = query.data?.items ?? [];
   const drivers = query.data?.drivers ?? [];
+  const audit = query.data?.audit ?? [];
   const [driverId, setDriverId] = useState("");
   const [plannedDate, setPlannedDate] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -1489,6 +1535,7 @@ export function LogisticsDraftPlanPage() {
             </div>
           )}
         </AdminSection>
+        <PlanAuditSection audit={audit} shipments={shipments} />
         <ShipmentTransferModal
           open={transferOpen}
           onClose={() => setTransferOpen(false)}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircleIcon,
   ChevronDownIcon,
@@ -13,6 +13,7 @@ import CustomerAvatar from "../ui/CustomerAvatar";
 import StatusBadge, { type StatusBadgeTone } from "../ui/StatusBadge";
 import { AdminEmptyState, AdminMetricCard, AdminMetricGrid, AdminSection } from "./AdminPageElements";
 import {
+  confirmDelivery,
   fetchPlanCompletionReport,
   type DriverCompletionStats,
   type PlanCompletionRow,
@@ -169,6 +170,7 @@ function PlanRow({ plan, onClick }: { plan: PlanCompletionRow; onClick: () => vo
 }
 
 export default function PlanCompletionSection({ className = "", refetchInterval = 20000 }: Props) {
+  const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["logistics", "plan-completion"],
     queryFn: () => fetchPlanCompletionReport(30),
@@ -176,6 +178,15 @@ export default function PlanCompletionSection({ className = "", refetchInterval 
   });
 
   const [selectedPlan, setSelectedPlan] = useState<PlanCompletionRow | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<{ shipmentId: string; reference: string | null } | null>(null);
+
+  const confirmMutation = useMutation({
+    mutationFn: ({ shipmentId, note }: { shipmentId: string; note?: string }) => confirmDelivery(shipmentId, note),
+    onSuccess: () => {
+      setConfirmTarget(null);
+      queryClient.invalidateQueries({ queryKey: ["logistics", "plan-completion"] });
+    },
+  });
 
   const totals = data?.totals;
   const drivers = data?.drivers ?? [];
@@ -203,7 +214,6 @@ export default function PlanCompletionSection({ className = "", refetchInterval 
         </AdminMetricGrid>
 
         <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[1.3fr_0.9fr]">
-          {/* Drivers */}
           <div className="space-y-2">
             {isLoading ? (
               <div className="h-40 animate-pulse rounded-xl bg-gray-100 dark:bg-white/[0.04]" />
@@ -222,7 +232,6 @@ export default function PlanCompletionSection({ className = "", refetchInterval 
             )}
           </div>
 
-          {/* Plan detail */}
           <div>
             <AdminSection title="تفاصيل الخطة">
               {!selectedPlan ? (
@@ -230,17 +239,81 @@ export default function PlanCompletionSection({ className = "", refetchInterval 
                   اختر خطة من قائمة السائقين لعرض تفاصيل إكمالها.
                 </p>
               ) : (
-                <PlanDetail plan={selectedPlan} />
+                <PlanDetail plan={selectedPlan} onConfirm={(shipment) => setConfirmTarget(shipment)} />
               )}
             </AdminSection>
           </div>
         </div>
       </div>
+
+      {confirmTarget ? (
+        <ConfirmDeliveryModal
+          reference={confirmTarget.reference}
+          busy={confirmMutation.isPending}
+          onCancel={() => setConfirmTarget(null)}
+          onConfirm={(note) => confirmMutation.mutate({ shipmentId: confirmTarget.shipmentId, note })}
+        />
+      ) : null}
     </AdminSection>
   );
 }
 
-function PlanDetail({ plan }: { plan: PlanCompletionRow }) {
+function ConfirmDeliveryModal({
+  reference,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  reference: string | null;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (note?: string) => void;
+}) {
+  const [note, setNote] = useState("");
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 px-4" dir="rtl">
+      <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">تأكيد تسليم من الأدمن</h2>
+        <p className="mt-2 text-sm leading-6 text-gray-500 dark:text-gray-400">
+          {reference ? `الشحنة ${reference}` : "شحنة مرتجعة"} اتسلمت فعليًا لكن ليس بواسطة السائق. سيتم تحويلها لحالة
+          مسلّمة وتُسجَّل كأوديت باسمك، مع بقاء التقصير محسوبًا على السائق.
+        </p>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="سبب التأكيد (اختياري)"
+          rows={3}
+          className="mt-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+        />
+        <div className="mt-5 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-white/[0.04]"
+          >
+            إلغاء
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm(note.trim() || undefined)}
+            disabled={busy}
+            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {busy ? "جاري التأكيد..." : "تأكيد التسليم"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlanDetail({
+  plan,
+  onConfirm,
+}: {
+  plan: PlanCompletionRow;
+  onConfirm: (shipment: { shipmentId: string; reference: string | null }) => void;
+}) {
   const statusTone: StatusBadgeTone = plan.complete ? "green" : plan.overdue ? "red" : "blue";
   const statusLabel = plan.complete ? "مكتملة" : plan.overdue ? "لم تكتمل" : "قيد التنفيذ";
 
@@ -284,9 +357,51 @@ function PlanDetail({ plan }: { plan: PlanCompletionRow }) {
             <div className="text-xs">
               <p className="font-bold text-amber-700 dark:text-amber-300">أوردرات مرتجعة ({plan.returned})</p>
               <p className="mt-1 text-amber-600 dark:text-amber-400">
-                سُجّلت بسبب السائق وتُحمَّل عليه كخطأ لحين تأكيد تسليمها من قبل الأدمن. تظل محسوبة ضمن خطأ السائق.
+                سُجّلت بسبب السائق وتُحمَّل عليه كخطأ لحين تأكيد تسليمها من قبل الأدمن. تظل محسوبة ضمن خطأ السائق حتى بعد
+                التأكيد.
               </p>
             </div>
+          </div>
+          <div className="mt-2 space-y-2">
+            {plan.returnedShipments.map((rs) => (
+              <div
+                key={rs.shipmentId}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200/70 bg-white/60 px-3 py-2 dark:border-amber-500/20 dark:bg-white/[0.04]"
+              >
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold text-gray-800 dark:text-gray-100" dir="ltr">
+                    {rs.reference ?? "شحنة مرتجعة"}
+                  </p>
+                  {rs.confirmed ? (
+                    <p className="mt-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
+                      <span className="font-bold">مسلّم بواسطة الأدمن:</span> {rs.confirmedBy ?? "الأدمن"}
+                      {rs.note ? ` • ${rs.note}` : ""}
+                    </p>
+                  ) : (
+                    <p className="mt-0.5 text-[10px] text-amber-500">لم يُؤكَّد تسليمه بعد — يُحمَّل على السائق</p>
+                  )}
+                </div>
+                {rs.confirmed ? (
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-1.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+                  >
+                    <CheckCircleIcon className="h-3.5 w-3.5" />
+                    تم التأكيد
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onConfirm({ shipmentId: rs.shipmentId, reference: rs.reference })}
+                    className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                  >
+                    <CheckCircleIcon className="h-3.5 w-3.5" />
+                    تأكيد تسليم من الأدمن
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       ) : null}

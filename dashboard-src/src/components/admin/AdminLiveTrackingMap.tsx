@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import L, { type LatLngBoundsExpression, type LatLngExpression, type DivIcon } from "leaflet";
 import {
   CircleMarker,
@@ -191,7 +191,10 @@ async function fetchOrsRoute(
 
 function FitBounds({ bounds }: { bounds: LatLngBoundsExpression }) {
   const map = useMap();
+  const hasFit = useRef(false);
   useEffect(() => {
+    if (hasFit.current) return;
+    hasFit.current = true;
     map.fitBounds(bounds, { padding: [56, 56], maxZoom: 14 });
   }, [bounds, map]);
   return null;

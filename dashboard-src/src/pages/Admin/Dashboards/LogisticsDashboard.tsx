@@ -532,6 +532,7 @@ function useMapData({ range }: DateRangeProps) {
 
       return { drivers, planRoutes };
     },
+    refetchInterval: 3000,
   });
 }
 

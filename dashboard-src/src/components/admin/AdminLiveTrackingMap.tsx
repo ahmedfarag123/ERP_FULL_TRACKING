@@ -530,6 +530,7 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
   const [tileMode, setTileMode] = useState<MapTileMode>("map");
   const [fullscreen, setFullscreen] = useState(false);
   const [useOrs, setUseOrs] = useState(false);
+  const [hideStale, setHideStale] = useState(false);
   const mapRef = useRef<HTMLDivElement>(null);
   const didDefaultFocus = useRef(false);
 
@@ -610,10 +611,16 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
     [plansWithSortedStops, selectedDriverId]
   );
 
-  const filteredDrivers = useMemo(
-    () => (selectedDriverId ? drivers.filter((d) => d.driverId === selectedDriverId) : drivers),
-    [drivers, selectedDriverId]
-  );
+  const filteredDrivers = useMemo(() => {
+    let list = selectedDriverId ? drivers.filter((d) => d.driverId === selectedDriverId) : drivers;
+    if (hideStale) {
+      list = list.filter((d) => {
+        if (!d.updatedAt) return false;
+        return (Date.now() - new Date(d.updatedAt).getTime()) < 15 * 60 * 1000;
+      });
+    }
+    return list;
+  }, [drivers, selectedDriverId, hideStale]);
 
   const handleSelectDriver = useCallback((driverId: string) => {
     setSelectedDriverId((prev) => (prev === driverId ? null : driverId));
@@ -855,6 +862,18 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
               style={{ fontFamily: "sans-serif", whiteSpace: "nowrap" }}
             >
               {useOrs ? "طرق حقيقية" : "خطوط مستقيمة"}
+            </button>
+            <button
+              onClick={() => setHideStale((v) => !v)}
+              title={hideStale ? "إظهار جميع السائقين" : "إخفاء السائقين غير المتصلين"}
+              className={`rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors ${
+                hideStale
+                  ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
+                  : "text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/[0.06]"
+              }`}
+              style={{ fontFamily: "sans-serif", whiteSpace: "nowrap" }}
+            >
+              {hideStale ? "إظهار الكل" : "إخفاء القديمة"}
             </button>
             <button
               onClick={toggleFullscreen}

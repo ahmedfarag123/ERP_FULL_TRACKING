@@ -362,6 +362,7 @@ function PlanCreatePanel({
   const { data: drivers = [] } = useQuery({
     queryKey: [...ROOT_QUERY, "drivers"],
     queryFn: fetchLogisticsDrivers,
+    refetchInterval: 10000,
   });
   const { data: districts = [] } = useQuery({
     queryKey: [...ROOT_QUERY, "districts"],
@@ -845,7 +846,7 @@ export function LogisticsPlansPage() {
   const [visible, setVisible] = useState<Record<PlanColumn, boolean>>({ select: true, reference: true, date: true, driver: true, district: true, shipments: true, status: true, distance: true, created: true });
   const { sort: planSort, toggle: planToggle, sorted: planSorted } = useSort({ key: "date", direction: "asc" });
   const query = useQuery({ queryKey: [...ROOT_QUERY, "plans"], queryFn: fetchLogisticsPlans });
-  const driversQuery = useQuery({ queryKey: [...ROOT_QUERY, "drivers"], queryFn: fetchLogisticsDrivers });
+  const driversQuery = useQuery({ queryKey: [...ROOT_QUERY, "drivers"], queryFn: fetchLogisticsDrivers, refetchInterval: 10000 });
   const drivers = driversQuery.data ?? [];
   const bulkOptimize = useMutation({
     mutationFn: async () => {

@@ -10,14 +10,14 @@ import {
   Printer,
   AlertTriangle,
   ChevronLeft,
-  Truck,
-  Warehouse,
+  Boxes,
 } from 'lucide-react';
 import { usePlanStore } from '../stores/planStore';
 import { useUIStore } from '../stores/uiStore';
 import { useAuthStore } from '../stores/authStore';
 import AppHeader from '../components/AppHeader';
 import PlanCard from '../components/PlanCard';
+import { dispatcherAsset } from '../lib/appAssets';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -28,6 +28,40 @@ const itemVariants = {
   hidden: { opacity: 0, y: 16 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.35 } },
 };
+
+function WarehouseIllustration() {
+  return (
+    <svg viewBox="0 0 320 120" fill="none" className="w-full h-auto opacity-[0.12]">
+      {/* Warehouse building */}
+      <rect x="40" y="30" width="240" height="80" rx="4" fill="white" />
+      <path d="M20 35 L160 8 L300 35" stroke="white" strokeWidth="3" fill="white" />
+      {/* Shelving unit left */}
+      <rect x="55" y="50" width="35" height="55" rx="2" fill="white" opacity="0.6" />
+      <rect x="58" y="53" width="29" height="12" rx="1" fill="white" opacity="0.4" />
+      <rect x="58" y="68" width="29" height="12" rx="1" fill="white" opacity="0.4" />
+      <rect x="58" y="83" width="29" height="12" rx="1" fill="white" opacity="0.4" />
+      <rect x="58" y="98" width="29" height="12" rx="1" fill="white" opacity="0.4" />
+      {/* Shelving unit right */}
+      <rect x="230" y="50" width="35" height="55" rx="2" fill="white" opacity="0.6" />
+      <rect x="233" y="53" width="29" height="12" rx="1" fill="white" opacity="0.4" />
+      <rect x="233" y="68" width="29" height="12" rx="1" fill="white" opacity="0.4" />
+      <rect x="233" y="83" width="29" height="12" rx="1" fill="white" opacity="0.4" />
+      <rect x="233" y="98" width="29" height="12" rx="1" fill="white" opacity="0.4" />
+      {/* Boxes in center */}
+      <rect x="120" y="75" width="22" height="22" rx="3" fill="white" opacity="0.5" />
+      <rect x="145" y="82" width="18" height="15" rx="3" fill="white" opacity="0.4" />
+      <rect x="125" y="55" width="16" height="16" rx="3" fill="white" opacity="0.35" />
+      <rect x="166" y="88" width="26" height="9" rx="2" fill="white" opacity="0.35" />
+      {/* Forklift */}
+      <rect x="185" y="95" width="20" height="12" rx="2" fill="white" opacity="0.5" />
+      <rect x="190" y="80" width="4" height="15" rx="1" fill="white" opacity="0.4" />
+      <circle cx="187" cy="110" r="4" fill="white" opacity="0.5" />
+      <circle cx="203" cy="110" r="4" fill="white" opacity="0.5" />
+      {/* Pallet on forklift */}
+      <rect x="191" y="72" width="12" height="8" rx="1" fill="white" opacity="0.4" />
+    </svg>
+  );
+}
 
 export default function DashboardScreen() {
   const navigate = useNavigate();
@@ -64,43 +98,69 @@ export default function DashboardScreen() {
         animate="visible"
         className="flex-1 overflow-y-auto no-scrollbar pb-24"
       >
-        {/* Hero Header */}
+        {/* Hero Header with Warehouse Illustration */}
         <motion.div
           variants={itemVariants}
-          className="relative bg-gradient-to-br from-emerald-700 via-emerald-600 to-teal-600 px-5 pt-5 pb-10 overflow-hidden"
+          className="relative bg-gradient-to-br from-emerald-800 via-emerald-700 to-teal-600 px-5 pt-5 pb-12 overflow-hidden"
         >
-          {/* Decorative circles */}
-          <div className="absolute -top-10 -left-10 w-40 h-40 rounded-full bg-white/5" />
-          <div className="absolute -bottom-16 -right-16 w-56 h-56 rounded-full bg-white/5" />
-          <div className="absolute top-8 right-8 w-20 h-20 rounded-full bg-white/5" />
+          {/* Background warehouse illustration */}
+          <div className="absolute inset-0 flex items-end justify-center pointer-events-none">
+            <WarehouseIllustration />
+          </div>
+
+          {/* Decorative elements */}
+          <div className="absolute -top-12 -left-12 w-48 h-48 rounded-full bg-white/[0.04]" />
+          <div className="absolute -bottom-20 -right-20 w-64 h-64 rounded-full bg-white/[0.04]" />
 
           <div className="relative z-10">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center border border-white/20">
-                <Warehouse size={24} className="text-white" />
+            {/* App identity */}
+            <div className="flex items-center gap-3 mb-5">
+              <div className="relative">
+                <img
+                  src={dispatcherAsset('manifest-icon.png')}
+                  alt="المخزن"
+                  className="w-14 h-14 rounded-2xl shadow-lg border-2 border-white/20 object-cover"
+                />
+                <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-green-400 border-2 border-emerald-700 flex items-center justify-center">
+                  <Package size={10} className="text-white" />
+                </div>
               </div>
               <div>
-                <h1 className="text-[15px] text-white/70 leading-tight">{getGreeting()}</h1>
-                {user?.full_name && (
-                  <h2 className="text-xl font-bold text-white leading-tight">{user.full_name}</h2>
-                )}
+                <div className="flex items-center gap-2">
+                  <h1 className="text-[17px] font-bold text-white leading-tight">تطبيق المخزن</h1>
+                  <span className="px-2 py-0.5 rounded-full bg-white/15 text-[10px] font-semibold text-white/80 border border-white/10">
+                    HorecaSmart
+                  </span>
+                </div>
+                <p className="text-[12px] text-white/50 mt-0.5">إدارة المخزون والشحنات</p>
               </div>
             </div>
-            <p className="text-[13px] text-white/60 mt-1">
-              {new Date().toLocaleDateString('ar-EG', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-              })}
-            </p>
+
+            {/* User greeting */}
+            <div className="bg-white/[0.08] backdrop-blur-sm rounded-xl p-3 border border-white/[0.08]">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[13px] text-white/60">{getGreeting()}</p>
+                  {user?.full_name && (
+                    <p className="text-[16px] font-bold text-white mt-0.5">{user.full_name}</p>
+                  )}
+                </div>
+                <div className="text-left">
+                  <p className="text-[11px] text-white/40">
+                    {new Date().toLocaleDateString('ar-EG', { weekday: 'short' })}
+                  </p>
+                  <p className="text-[15px] font-bold text-white">
+                    {new Date().toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' })}
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </motion.div>
 
         {/* Stats Grid */}
         <motion.div variants={itemVariants} className="px-4 -mt-6 relative z-10">
           <div className="grid grid-cols-2 gap-3">
-            {/* Active Plans */}
             <button
               onClick={() => { setActiveTab('plans'); navigate('/plans'); }}
               className="bg-white rounded-2xl p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] text-right active:scale-[0.97] transition-transform"
@@ -115,7 +175,6 @@ export default function DashboardScreen() {
               <p className="text-[12px] text-gray-400 mt-0.5">خططة نشطة</p>
             </button>
 
-            {/* Preparing */}
             <div className="bg-white rounded-2xl p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)]">
               <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center mb-3">
                 <Package size={20} className="text-amber-500" />
@@ -124,7 +183,6 @@ export default function DashboardScreen() {
               <p className="text-[12px] text-gray-400 mt-0.5">قيد التجهيز</p>
             </div>
 
-            {/* Ready */}
             <div className="bg-white rounded-2xl p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)]">
               <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center mb-3">
                 <CheckCircle size={20} className="text-green-500" />
@@ -133,7 +191,6 @@ export default function DashboardScreen() {
               <p className="text-[12px] text-gray-400 mt-0.5">جاهز للتسليم</p>
             </div>
 
-            {/* Pending */}
             <div className="bg-white rounded-2xl p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)]">
               <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center mb-3">
                 <Clock size={20} className="text-blue-500" />
@@ -202,7 +259,7 @@ export default function DashboardScreen() {
                 iconColor: 'text-violet-600',
               },
               {
-                icon: Package,
+                icon: Boxes,
                 label: 'المخزون',
                 sub: 'عرض المنتجات',
                 action: () => { setActiveTab('inventory'); navigate('/inventory'); },
@@ -266,9 +323,11 @@ export default function DashboardScreen() {
         {/* Empty state */}
         {activePlans.length === 0 && !usePlanStore.getState().isLoading && (
           <motion.div variants={itemVariants} className="px-4 mt-8 text-center">
-            <div className="w-20 h-20 rounded-3xl bg-emerald-50 flex items-center justify-center mx-auto mb-4">
-              <Truck size={36} className="text-emerald-300" />
-            </div>
+            <img
+              src={dispatcherAsset('manifest-icon.png')}
+              alt=""
+              className="w-20 h-20 rounded-3xl mx-auto mb-4 shadow-lg border border-gray-100 object-cover"
+            />
             <p className="text-[15px] font-semibold text-gray-700">مفيش خطط نشطة حاليًا</p>
             <p className="text-[13px] text-gray-400 mt-1">الخطط الجديدة هتظهر هنا لما تتسجل</p>
           </motion.div>

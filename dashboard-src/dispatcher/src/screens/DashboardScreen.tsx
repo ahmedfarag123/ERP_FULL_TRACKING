@@ -27,6 +27,7 @@ export default function DashboardScreen() {
   const user = useAuthStore((s) => s.user);
   const setActiveTab = useUIStore((s) => s.setActiveTab);
 
+  const activePlans = useMemo(() => plans.filter((p) => p.plan_bucket === 'active'), [plans]);
   const stats = useMemo(() => getStats(), [getStats, plans]);
 
   useEffect(() => {
@@ -41,7 +42,10 @@ export default function DashboardScreen() {
     return 'مساء الخير';
   };
 
-  const recentPlans = plans.slice(0, 5);
+  const recentPlans = activePlans.slice(0, 5);
+
+  const missedCount = useMemo(() => plans.filter((p) => p.plan_bucket === 'missed').length, [plans]);
+  const completedCount = useMemo(() => plans.filter((p) => p.plan_bucket === 'completed').length, [plans]);
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-100">
@@ -69,6 +73,24 @@ export default function DashboardScreen() {
             </motion.div>
           ))}
         </motion.div>
+
+        {/* Missed & Completed counts */}
+        {(missedCount > 0 || completedCount > 0) && (
+          <motion.div variants={itemVariants} className="px-4 mt-3 flex gap-2">
+            {missedCount > 0 && (
+              <div className="flex-1 bg-orange-50 rounded-xl p-2.5 text-center">
+                <span className="text-lg font-bold text-orange-600">{missedCount}</span>
+                <span className="text-xs text-orange-500 block">فائتة</span>
+              </div>
+            )}
+            {completedCount > 0 && (
+              <div className="flex-1 bg-gray-100 rounded-xl p-2.5 text-center">
+                <span className="text-lg font-bold text-gray-500">{completedCount}</span>
+                <span className="text-xs text-gray-400 block">مكتملة</span>
+              </div>
+            )}
+          </motion.div>
+        )}
 
         {/* Action Cards */}
         <motion.div variants={itemVariants} className="px-4 mt-5">

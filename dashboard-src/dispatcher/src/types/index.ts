@@ -18,6 +18,10 @@ export interface DispatcherUser {
   requires_password_change: boolean;
 }
 
+export type PlanBucket = 'active' | 'missed' | 'completed';
+
+export type OverdueReason = 'driver' | 'dispatcher' | null;
+
 export interface DispatcherPlan {
   id: string;
   plan_id: string;
@@ -29,6 +33,8 @@ export interface DispatcherPlan {
   confirmed_items: number;
   orders_count: number;
   has_shortages: boolean;
+  plan_bucket: PlanBucket;
+  overdue_reason: OverdueReason;
 }
 
 export interface DispatcherPlanItem {

@@ -5,9 +5,15 @@ import { usePlanStore } from '../stores/planStore';
 import { useUIStore } from '../stores/uiStore';
 import AppHeader from '../components/AppHeader';
 import PlanCard from '../components/PlanCard';
-import type { DispatcherPlan, DispatcherPlanItem } from '../types';
+import type { DispatcherPlan, DispatcherPlanItem, PlanBucket } from '../types';
 
-const filters = [
+const bucketFilters: { key: PlanBucket; label: string }[] = [
+  { key: 'active', label: 'نشطة' },
+  { key: 'missed', label: 'فائتة' },
+  { key: 'completed', label: 'مكتملة' },
+];
+
+const statusFilters = [
   { key: 'all', label: 'الكل' },
   { key: 'pending', label: 'جديد' },
   { key: 'preparing', label: 'قيد التجهيز' },
@@ -78,20 +84,16 @@ function openRunsheetPrintWindow(plan: DispatcherPlan, items: DispatcherPlanItem
       td:nth-child(4), th:nth-child(4) { width: 80px; text-align: center; font-weight: 700; }
       td:nth-child(5), th:nth-child(5) { width: 70px; text-align: center; }
       td:nth-child(6), th:nth-child(6) { width: 100px; }
-      strong { display: block; font-size: 13px; }
-      span { display: block; margin-top: 3px; color: #6b7280; }
-      footer { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 28px; font-size: 12px; }
-      .signature { border-top: 1px solid #111827; padding-top: 8px; }
-      @page { size: A4; margin: 12mm; }
       @media print { body { padding: 0; } }
     </style>
   </head>
   <body>
     <header>
       <h1>قائمة تجهيز الخطة</h1>
-      <p>رقم الخطة: ${escapeHtml(plan.plan_reference ?? plan.plan_id)}</p>
-      <p>السائق: ${escapeHtml(plan.driver_name ?? '—')} | التاريخ: ${escapeHtml(plan.planned_date ?? '—')}</p>
-      <p>عدد المنتجات: ${items.length} | وقت الطباعة: ${escapeHtml(printedAt)}</p>
+      <p><strong>رقم الخطة:</strong> ${escapeHtml(plan.plan_reference)}</p>
+      <p><strong>السائق:</strong> ${escapeHtml(plan.driver_name)}</p>
+      <p><strong>التاريخ:</strong> ${escapeHtml(plan.planned_date)}</p>
+      <p><strong>مُعداد القائمة:</strong> ${escapeHtml(printedAt)}</p>
     </header>
     <table>
       <thead>
@@ -104,28 +106,16 @@ function openRunsheetPrintWindow(plan: DispatcherPlan, items: DispatcherPlanItem
           <th>سبب النقص</th>
         </tr>
       </thead>
-      <tbody>${rows || '<tr><td colspan="6">لا توجد منتجات للطباعة</td></tr>'}</tbody>
+      <tbody>${rows}</tbody>
     </table>
-    <footer>
-      <div class="signature">مسؤول التجهيز</div>
-      <div class="signature">مراجعة المخزن</div>
-    </footer>
+    <script>window.onload = () => { window.print(); }</script>
   </body>
 </html>`;
 
-  const printWindow = window.open('', '_blank', 'width=1024,height=768');
-  if (!printWindow) return false;
-
-  printWindow.document.open();
-  printWindow.document.write(html);
-  printWindow.document.close();
-
-  window.setTimeout(() => {
-    printWindow.focus();
-    printWindow.print();
-  }, 300);
-
-  return true;
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const w = window.open(url, '_blank', 'width=900,height=650');
+  return !!w;
 }
 
 export default function PlansListScreen({ printMode = false }: PlansListScreenProps) {
@@ -137,6 +127,8 @@ export default function PlansListScreen({ printMode = false }: PlansListScreenPr
   const getFilteredPlans = usePlanStore((s) => s.getFilteredPlans);
   const statusFilter = usePlanStore((s) => s.statusFilter);
   const setStatusFilter = usePlanStore((s) => s.setStatusFilter);
+  const planBucketFilter = usePlanStore((s) => s.planBucketFilter);
+  const setPlanBucketFilter = usePlanStore((s) => s.setPlanBucketFilter);
   const searchQuery = usePlanStore((s) => s.searchQuery);
   const setSearchQuery = usePlanStore((s) => s.setSearchQuery);
   const isLoading = usePlanStore((s) => s.isLoading);
@@ -153,6 +145,13 @@ export default function PlansListScreen({ printMode = false }: PlansListScreenPr
     [filteredPlans, selectedPlanId],
   );
 
+  const plans = usePlanStore((s) => s.plans);
+  const bucketCounts = useMemo(() => ({
+    active: plans.filter((p) => p.plan_bucket === 'active').length,
+    missed: plans.filter((p) => p.plan_bucket === 'missed').length,
+    completed: plans.filter((p) => p.plan_bucket === 'completed').length,
+  }), [plans]);
+
   useEffect(() => {
     loadPlans();
     setActiveTab('plans');
@@ -163,6 +162,7 @@ export default function PlansListScreen({ printMode = false }: PlansListScreenPr
   }, [isPrintMode]);
 
   const openPlanDetail = (plan: DispatcherPlan) => {
+    if (plan.plan_bucket !== 'active') return;
     selectPlan(plan.plan_id);
     navigate(`/plans/${plan.plan_id}`);
   };
@@ -176,7 +176,6 @@ export default function PlansListScreen({ printMode = false }: PlansListScreenPr
     setIsPrinting(true);
     try {
       await loadPlanDetail(selectedPlanId);
-      // Read items from store after loading
       const { planItems } = usePlanStore.getState();
 
       if (planItems.length === 0) {
@@ -209,13 +208,29 @@ export default function PlansListScreen({ printMode = false }: PlansListScreenPr
           </div>
         </div>
 
+        {/* Bucket tabs */}
         <div className="px-4 mt-3 flex gap-2 overflow-x-auto no-scrollbar">
-          {filters.map((f) => (
-            <button key={f.key} onClick={() => setStatusFilter(f.key)} className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${statusFilter === f.key ? 'bg-app-dark text-white' : 'bg-white text-app-text-secondary shadow-card'}`}>
-              {f.label}
-            </button>
-          ))}
+          {bucketFilters.map((f) => {
+            const count = bucketCounts[f.key];
+            return (
+              <button key={f.key} onClick={() => setPlanBucketFilter(f.key)} className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${planBucketFilter === f.key ? 'bg-app-dark text-white' : 'bg-white text-app-text-secondary shadow-card'}`}>
+                {f.label}
+                {count > 0 && <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-gray-200 text-gray-600">{count}</span>}
+              </button>
+            );
+          })}
         </div>
+
+        {/* Status filters (active bucket only) */}
+        {planBucketFilter === 'active' && (
+          <div className="px-4 mt-2 flex gap-2 overflow-x-auto no-scrollbar">
+            {statusFilters.map((f) => (
+              <button key={f.key} onClick={() => setStatusFilter(f.key)} className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all ${statusFilter === f.key ? 'bg-brand-100 text-brand-700' : 'bg-white text-app-text-secondary shadow-card'}`}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {isPrintMode && (
           <div className="px-4 mt-3 flex items-center justify-between">

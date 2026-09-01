@@ -6,6 +6,8 @@ import type {
   DispatcherPlanItem,
   DispatcherPlanOrder,
   PlanPreparationStatus,
+  PlanBucket,
+  OverdueReason,
   UnavailabilityReason,
 } from '../types';
 
@@ -18,6 +20,7 @@ interface PlanState {
   error: string | null;
   statusFilter: string;
   searchQuery: string;
+  planBucketFilter: import('../types').PlanBucket;
   loadPlans: () => Promise<void>;
   loadPlanDetail: (planId: string) => Promise<void>;
   selectPlan: (id: string | null) => void;
@@ -34,6 +37,7 @@ interface PlanState {
   bulkMarkAllReady: (planId: string) => Promise<number>;
   setStatusFilter: (filter: string) => void;
   setSearchQuery: (query: string) => void;
+  setPlanBucketFilter: (bucket: import('../types').PlanBucket) => void;
   getFilteredPlans: () => DispatcherPlan[];
   getStats: () => { total: number; pending: number; preparing: number; ready: number };
 }
@@ -130,10 +134,13 @@ export const usePlanStore = create<PlanState>()(
       error: null,
       statusFilter: 'all',
       searchQuery: '',
+      planBucketFilter: 'active' as import('../types').PlanBucket,
 
       loadPlans: async () => {
         set({ isLoading: true, error: null });
         try {
+          const todayStr = new Date().toISOString().slice(0, 10);
+
           const { data: preparations, error: prepError } = await supabase
             .from('dispatcher_plan_preparations')
             .select('id, plan_id, status, started_at, completed_at, duration_seconds, dispatcher_profile_id');
@@ -147,31 +154,18 @@ export const usePlanStore = create<PlanState>()(
             }
           }
 
-          // Fetch plans that have active preparations or are pending/in_progress
-          const planIdsFromPreps = (preparations ?? [])
-            .filter((p: PlanRow) => p.status !== 'cancelled')
-            .map((p: PlanRow) => p.plan_id);
-
           const { data: plans, error: planError } = await supabase
             .from('logistics_delivery_plans')
             .select('id, plan_reference, planned_date, plan_status, assigned_profile_id, logistics_user_id')
-            .in('plan_status', ['pending', 'in_progress'])
             .order('planned_date', { ascending: false });
 
           if (planError) throw new Error(planError.message);
-
-          // Merge: plans with preparations + plans without preparations
-          const allPlanIds = new Set([
-            ...planIdsFromPreps,
-            ...((plans ?? []).map((p: PlanInfoRow) => p.id)),
-          ]);
 
           const planInfoMap = new Map<string, PlanInfoRow>();
           for (const p of (plans ?? []) as PlanInfoRow[]) {
             planInfoMap.set(p.id, p);
           }
 
-          // Fetch driver names
           const driverIds = [...new Set(
             (plans ?? [])
               .map((p: PlanInfoRow) => p.logistics_user_id)
@@ -189,7 +183,6 @@ export const usePlanStore = create<PlanState>()(
             );
           }
 
-          // Fetch item counts for plans with preparations
           const planIdsWithPreps = [...preparationByPlan.keys()];
           let itemCountsByPlan = new Map<string, { total: number; confirmed: number; hasShortages: boolean }>();
 
@@ -208,7 +201,6 @@ export const usePlanStore = create<PlanState>()(
             }
           }
 
-          // Fetch orders count per plan
           let ordersCountByPlan = new Map<string, number>();
           if (planIdsWithPreps.length > 0) {
             const { data: orderCounts } = await supabase
@@ -222,28 +214,50 @@ export const usePlanStore = create<PlanState>()(
             }
           }
 
-          const result: DispatcherPlan[] = [...allPlanIds].map((planId) => {
-            const prep = preparationByPlan.get(planId);
-            const info = planInfoMap.get(planId);
-            const stats = itemCountsByPlan.get(planId);
-            const driverName = info?.logistics_user_id ? driverMap.get(info.logistics_user_id) ?? null : null;
+          const result: DispatcherPlan[] = (plans ?? []).map((info: PlanInfoRow) => {
+            const prep = preparationByPlan.get(info.id);
+            const stats = itemCountsByPlan.get(info.id);
+            const driverName = info.logistics_user_id ? driverMap.get(info.logistics_user_id) ?? null : null;
+            const prepStatus = String(prep?.status ?? '').toLowerCase();
+            const isPast = info.planned_date != null && info.planned_date < todayStr;
+
+            let bucket: PlanBucket;
+            let overdueReason: OverdueReason = null;
+
+            if (info.plan_status === 'completed' || info.plan_status === 'returned') {
+              bucket = 'completed';
+            } else if (isPast) {
+              bucket = 'missed';
+              if (prepStatus === 'ready') {
+                overdueReason = 'driver';
+              } else {
+                overdueReason = 'dispatcher';
+              }
+            } else {
+              bucket = 'active';
+            }
 
             return {
-              id: prep?.id ?? planId,
-              plan_id: planId,
-              plan_reference: info?.plan_reference ?? null,
+              id: prep?.id ?? info.id,
+              plan_id: info.id,
+              plan_reference: info.plan_reference ?? null,
               driver_name: driverName,
-              planned_date: info?.planned_date ?? null,
-              preparation_status: mapPlanPreparationStatus(info?.plan_status, prep?.status),
+              planned_date: info.planned_date ?? null,
+              preparation_status: mapPlanPreparationStatus(info.plan_status, prep?.status),
               total_items: stats?.total ?? 0,
               confirmed_items: stats?.confirmed ?? 0,
-              orders_count: ordersCountByPlan.get(planId) ?? 0,
+              orders_count: ordersCountByPlan.get(info.id) ?? 0,
               has_shortages: stats?.hasShortages ?? false,
+              plan_bucket: bucket,
+              overdue_reason: overdueReason,
             };
           });
 
-          // Sort: pending first, then by date descending
           result.sort((a, b) => {
+            const bucketOrder: Record<string, number> = { active: 0, missed: 1, completed: 2 };
+            const ba = bucketOrder[a.plan_bucket] ?? 0;
+            const bb = bucketOrder[b.plan_bucket] ?? 0;
+            if (ba !== bb) return ba - bb;
             const statusOrder: Record<string, number> = { pending: 0, preparing: 1, ready: 2, cancelled: 3 };
             const sa = statusOrder[a.preparation_status] ?? 0;
             const sb = statusOrder[b.preparation_status] ?? 0;
@@ -317,6 +331,8 @@ export const usePlanStore = create<PlanState>()(
             confirmed_items: confirmedCount,
             orders_count: orders.length,
             has_shortages: hasShortages,
+            plan_bucket: 'active',
+            overdue_reason: null,
           };
 
           set((state) => ({
@@ -425,10 +441,11 @@ export const usePlanStore = create<PlanState>()(
 
       setStatusFilter: (filter) => set({ statusFilter: filter }),
       setSearchQuery: (query) => set({ searchQuery: query }),
+      setPlanBucketFilter: (bucket) => set({ planBucketFilter: bucket, statusFilter: 'all' }),
 
       getFilteredPlans: () => {
-        const { plans, statusFilter, searchQuery } = get();
-        let filtered = plans;
+        const { plans, statusFilter, searchQuery, planBucketFilter } = get();
+        let filtered = plans.filter((p) => p.plan_bucket === planBucketFilter);
         if (statusFilter !== 'all') {
           filtered = filtered.filter((plan) => plan.preparation_status === statusFilter);
         }
@@ -445,11 +462,12 @@ export const usePlanStore = create<PlanState>()(
 
       getStats: () => {
         const { plans } = get();
+        const active = plans.filter((p) => p.plan_bucket === 'active');
         return {
-          total: plans.length,
-          pending: plans.filter((p) => p.preparation_status === 'pending').length,
-          preparing: plans.filter((p) => p.preparation_status === 'preparing').length,
-          ready: plans.filter((p) => p.preparation_status === 'ready').length,
+          total: active.length,
+          pending: active.filter((p) => p.preparation_status === 'pending').length,
+          preparing: active.filter((p) => p.preparation_status === 'preparing').length,
+          ready: active.filter((p) => p.preparation_status === 'ready').length,
         };
       },
     }),

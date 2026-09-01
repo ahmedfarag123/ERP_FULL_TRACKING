@@ -115,23 +115,11 @@ export default function DashboardScreen() {
           <div className="relative z-10">
             {/* App identity */}
             <div className="flex items-center gap-3 mb-5">
-              <div className="relative">
-                <img
-                  src={dispatcherAsset('manifest-icon.png')}
-                  alt="المخزن"
-                  className="w-14 h-14 rounded-2xl shadow-lg border-2 border-white/20 object-cover"
-                />
-                <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-green-400 border-2 border-emerald-700 flex items-center justify-center">
-                  <Package size={10} className="text-white" />
-                </div>
+              <div className="w-12 h-12 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center border border-white/20">
+                <Package size={24} className="text-white" />
               </div>
               <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-[17px] font-bold text-white leading-tight">تطبيق المخزن</h1>
-                  <span className="px-2 py-0.5 rounded-full bg-white/15 text-[10px] font-semibold text-white/80 border border-white/10">
-                    HorecaSmart
-                  </span>
-                </div>
+                <h1 className="text-[17px] font-bold text-white leading-tight">تطبيق المخزن</h1>
                 <p className="text-[12px] text-white/50 mt-0.5">إدارة المخزون والشحنات</p>
               </div>
             </div>

@@ -44,9 +44,6 @@ export default function DashboardScreen() {
 
   const recentPlans = activePlans.slice(0, 5);
 
-  const missedCount = useMemo(() => plans.filter((p) => p.plan_bucket === 'missed').length, [plans]);
-  const completedCount = useMemo(() => plans.filter((p) => p.plan_bucket === 'completed').length, [plans]);
-
   return (
     <div className="flex flex-col min-h-screen bg-gray-100">
       <AppHeader />
@@ -75,17 +72,17 @@ export default function DashboardScreen() {
         </motion.div>
 
         {/* Missed & Completed counts */}
-        {(missedCount > 0 || completedCount > 0) && (
+        {(stats.missed > 0 || stats.completed > 0) && (
           <motion.div variants={itemVariants} className="px-4 mt-3 flex gap-2">
-            {missedCount > 0 && (
+            {stats.missed > 0 && (
               <div className="flex-1 bg-orange-50 rounded-xl p-2.5 text-center">
-                <span className="text-lg font-bold text-orange-600">{missedCount}</span>
+                <span className="text-lg font-bold text-orange-600">{stats.missed}</span>
                 <span className="text-xs text-orange-500 block">فائتة</span>
               </div>
             )}
-            {completedCount > 0 && (
+            {stats.completed > 0 && (
               <div className="flex-1 bg-gray-100 rounded-xl p-2.5 text-center">
-                <span className="text-lg font-bold text-gray-500">{completedCount}</span>
+                <span className="text-lg font-bold text-gray-500">{stats.completed}</span>
                 <span className="text-xs text-gray-400 block">مكتملة</span>
               </div>
             )}

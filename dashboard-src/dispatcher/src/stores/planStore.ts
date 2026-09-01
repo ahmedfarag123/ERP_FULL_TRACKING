@@ -39,7 +39,7 @@ interface PlanState {
   setSearchQuery: (query: string) => void;
   setPlanBucketFilter: (bucket: import('../types').PlanBucket) => void;
   getFilteredPlans: () => DispatcherPlan[];
-  getStats: () => { total: number; pending: number; preparing: number; ready: number };
+  getStats: () => { total: number; pending: number; preparing: number; ready: number; missed: number; completed: number; overdueDriver: number; overdueDispatcher: number };
 }
 
 type PlanRow = {
@@ -226,15 +226,16 @@ export const usePlanStore = create<PlanState>()(
 
             if (info.plan_status === 'completed' || info.plan_status === 'returned') {
               bucket = 'completed';
-            } else if (isPast) {
+            } else if (isPast && !prep) {
               bucket = 'missed';
-              if (prepStatus === 'ready') {
-                overdueReason = 'driver';
-              } else {
-                overdueReason = 'dispatcher';
-              }
+              overdueReason = 'dispatcher';
             } else {
               bucket = 'active';
+              if (isPast && prepStatus === 'ready') {
+                overdueReason = 'driver';
+              } else if (isPast && prepStatus !== 'ready') {
+                overdueReason = 'dispatcher';
+              }
             }
 
             return {
@@ -463,11 +464,17 @@ export const usePlanStore = create<PlanState>()(
       getStats: () => {
         const { plans } = get();
         const active = plans.filter((p) => p.plan_bucket === 'active');
+        const missed = plans.filter((p) => p.plan_bucket === 'missed');
+        const completed = plans.filter((p) => p.plan_bucket === 'completed');
         return {
           total: active.length,
           pending: active.filter((p) => p.preparation_status === 'pending').length,
           preparing: active.filter((p) => p.preparation_status === 'preparing').length,
           ready: active.filter((p) => p.preparation_status === 'ready').length,
+          missed: missed.length,
+          completed: completed.length,
+          overdueDriver: active.filter((p) => p.overdue_reason === 'driver').length,
+          overdueDispatcher: active.filter((p) => p.overdue_reason === 'dispatcher').length,
         };
       },
     }),

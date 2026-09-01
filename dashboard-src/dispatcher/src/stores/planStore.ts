@@ -258,10 +258,6 @@ export const usePlanStore = create<PlanState>()(
             const ba = bucketOrder[a.plan_bucket] ?? 0;
             const bb = bucketOrder[b.plan_bucket] ?? 0;
             if (ba !== bb) return ba - bb;
-            const statusOrder: Record<string, number> = { pending: 0, preparing: 1, ready: 2, cancelled: 3 };
-            const sa = statusOrder[a.preparation_status] ?? 0;
-            const sb = statusOrder[b.preparation_status] ?? 0;
-            if (sa !== sb) return sa - sb;
             return (b.planned_date ?? '').localeCompare(a.planned_date ?? '');
           });
 

@@ -226,16 +226,15 @@ export const usePlanStore = create<PlanState>()(
 
             if (info.plan_status === 'completed' || info.plan_status === 'returned') {
               bucket = 'completed';
-            } else if (isPast && !prep) {
+            } else if (isPast) {
               bucket = 'missed';
-              overdueReason = 'dispatcher';
-            } else {
-              bucket = 'active';
-              if (isPast && prepStatus === 'ready') {
+              if (prep && prepStatus === 'ready') {
                 overdueReason = 'driver';
-              } else if (isPast && prepStatus !== 'ready') {
+              } else {
                 overdueReason = 'dispatcher';
               }
+            } else {
+              bucket = 'active';
             }
 
             return {

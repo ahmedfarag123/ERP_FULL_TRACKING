@@ -690,7 +690,7 @@ function DriverOverviewTable({ drivers, isLoading }: { drivers: LogisticsDriver[
     lastActivity: (d) => d.lastActivity ?? "",
     todayDeliveries: (d) => d.todayDeliveries ?? 0,
     successRate: (d) => d.successRate ?? 0,
-    balance: (d) => d.dueBalance + d.codAmount + d.collectionAmount,
+    balance: (d) => d.dueBalance,
   }), [filtered, sort]);
   const pageRows = sortedRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   return (
@@ -734,7 +734,7 @@ function DriverOverviewTable({ drivers, isLoading }: { drivers: LogisticsDriver[
                     <td className="px-4 py-4">{formatDateTime(driver.lastActivity)}</td>
                     <td className="px-4 py-4">{driver.todayDeliveries}</td>
                     <td className="px-4 py-4">{driver.successRate}%</td>
-                    <td className="px-4 py-4">{formatMoney(driver.dueBalance + driver.codAmount + driver.collectionAmount)}</td>
+                    <td className="px-4 py-4">{formatMoney(driver.dueBalance)}</td>
                   </tr>
                 ))}
               </tbody>

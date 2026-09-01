@@ -486,19 +486,30 @@ async function fetchPlanItems(shipmentIds: string[]): Promise<LogisticsPlanItem[
 }
 
 export async function fetchLogisticsDrivers(): Promise<LogisticsDriver[]> {
-  const [{ data: drivers, error: driverError }, { data: shipments, error: shipmentError }, { data: plans, error: planError }, { data: liveRows }] =
+  const [{ data: drivers, error: driverError }, { data: shipments, error: shipmentError }, { data: plans, error: planError }, { data: liveRows }, { data: collections, error: collectionError }] =
     await Promise.all([
       supabase.from("logistics_users").select(DRIVER_SELECT).order("employee_name"),
       supabase.from("logistics_shipments").select("id, logistics_user_id, shipment_status, scheduled_at, completed_at"),
       supabase.from("logistics_delivery_plans").select("id, plan_reference, logistics_user_id, plan_status, planned_date"),
       supabase.from("active_drivers_view").select("id, latitude, longitude, updated_at"),
+      supabase.from("logistics_shipment_collections").select("collected_by_logistics_user_id, pending_delivery_amount, collected_successfully_amount, driver_debt_amount"),
     ]);
 
   if (driverError) throw driverError;
   if (shipmentError) throw shipmentError;
   if (planError) throw planError;
+  if (collectionError) throw collectionError;
 
   const liveByProfile = new Map((liveRows ?? []).map((row: any) => [row.id, row]));
+  const collectionTotals = new Map<string, { due: number; cod: number; collected: number }>();
+  for (const c of (collections ?? []) as any[]) {
+    if (!c.collected_by_logistics_user_id) continue;
+    const cur = collectionTotals.get(c.collected_by_logistics_user_id) ?? { due: 0, cod: 0, collected: 0 };
+    cur.due += Number(c.driver_debt_amount ?? 0);
+    cur.cod += Number(c.pending_delivery_amount ?? 0);
+    cur.collected += Number(c.collected_successfully_amount ?? 0);
+    collectionTotals.set(c.collected_by_logistics_user_id, cur);
+  }
   const today = new Date().toISOString().slice(0, 10);
 
   return (drivers ?? []).map((row: any) => {
@@ -533,9 +544,9 @@ export async function fetchLogisticsDrivers(): Promise<LogisticsDriver[]> {
       shipments: driverShipments.length,
       todayDeliveries: driverShipments.filter((shipment: any) => dateOnly(shipment.scheduled_at) === today).length,
       successRate: delivered + failed > 0 ? Math.round((delivered / (delivered + failed)) * 100) : 0,
-      dueBalance: 0,
-      codAmount: 0,
-      collectionAmount: 0,
+      dueBalance: collectionTotals.get(row.id)?.due ?? 0,
+      codAmount: collectionTotals.get(row.id)?.cod ?? 0,
+      collectionAmount: collectionTotals.get(row.id)?.collected ?? 0,
       lastActivity: row.last_sync_at ?? live?.updated_at ?? null,
       lastLocation: live?.latitude && live?.longitude ? `${Number(live.latitude).toFixed(4)}, ${Number(live.longitude).toFixed(4)}` : row.work_location ?? null,
       latitude: live?.latitude ?? null,

@@ -10,6 +10,7 @@ import {
   useMap,
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
+import { timeAgo } from "../../lib/format";
 
 const ORS_API_KEY = String(import.meta.env.VITE_ORS_API_KEY ?? "").trim();
 
@@ -980,7 +981,11 @@ function DriverMarker({
                 {Math.round(driver.headingDegrees as number)}° ضلع
               </span>
             ) : (
-              <span>موقع مباشر</span>
+              <span>
+                {driver.updatedAt && (Date.now() - new Date(driver.updatedAt).getTime()) < 15 * 60 * 1000
+                  ? "موقع مباشر"
+                  : `آخر تحديث ${timeAgo(driver.updatedAt)}`}
+              </span>
             )}
           </div>
         </div>

@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Package,
-  Clock,
   CheckCircle,
   XCircle,
   AlertTriangle,
@@ -14,31 +13,34 @@ import {
   Camera,
   DollarSign,
   Truck,
+  MapPin,
+  ChevronLeft,
+  RotateCcw,
 } from 'lucide-react';
 import { useDeliveryStore } from '@/stores/deliveryStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useAuthStore } from '@/stores/authStore';
 import ShipmentListItem from '@/components/ShipmentListItem';
-import AppHeader from '@/components/AppHeader';
-import DriverLiveRouteMap from '@/components/DriverLiveRouteMap';
 import BottomSheet from '@/components/BottomSheet';
+import DriverLiveRouteMap from '@/components/DriverLiveRouteMap';
 import EndOfRouteModal from '@/components/EndOfRouteModal';
 import { createDriverSosAlert } from '@/services/driverAlerts';
 import { submitCollectionRequest, submitCollectionHandover } from '@/services/collectionHandover';
 import { uploadDeliveryProof, fetchOrderCollectionsForPlan } from '@/services/shipmentData';
+import { driverAsset } from '@/lib/appAssets';
 import type { SettlementBreakdown } from '@/types';
 
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { staggerChildren: 0.05 },
+    transition: { staggerChildren: 0.06 },
   },
 };
 
 const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
+  hidden: { opacity: 0, y: 16 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' as const } },
 };
 
 export default function DashboardScreen() {
@@ -469,244 +471,286 @@ export default function DashboardScreen() {
     return { total, delivered, pending, failed };
   }, [activePlanShipments]);
   const displayStats = activePlanId ? planStats : stats;
-  const statCards = [
-    { label: 'الإجمالي', value: displayStats.total, icon: Package, color: 'text-gray-500' },
-    { label: 'معلق', value: displayStats.pending, icon: Clock, color: 'text-app-accent' },
-    { label: 'تم', value: displayStats.delivered, icon: CheckCircle, color: 'text-app-success' },
-    ...(displayStats.failed > 0 ? [{ label: 'فشل', value: displayStats.failed, icon: XCircle, color: 'text-app-error' }] : []),
-  ];
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-100">
-      <AppHeader />
+    <div className="flex flex-col min-h-screen bg-gray-50">
+      {/* Hero Header */}
+      <div className="relative bg-gradient-to-br from-emerald-600 via-emerald-500 to-teal-500 px-5 pt-6 pb-20 rounded-b-[28px] overflow-hidden">
+        {/* Decorative circles */}
+        <div className="absolute -top-12 -right-12 w-40 h-40 bg-white/10 rounded-full" />
+        <div className="absolute -bottom-8 -left-8 w-32 h-32 bg-white/5 rounded-full" />
+        <div className="absolute top-8 left-1/2 w-20 h-20 bg-white/5 rounded-full" />
+
+        <div className="relative z-10">
+          {/* Top row: logo + online toggle */}
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2.5">
+              <img
+                src={driverAsset('logo.png')}
+                alt=""
+                className="h-9 w-9 rounded-xl object-contain bg-white/20 p-1"
+              />
+              <span className="text-white/90 text-sm font-semibold">هوريكا سمارت</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setDriverOnline(!isDriverOnline);
+                handleSync();
+              }}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
+                isDriverOnline
+                  ? 'bg-white/20 text-white'
+                  : 'bg-white/10 text-white/70'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${isDriverOnline ? 'bg-white animate-pulse' : 'bg-white/40'}`} />
+              {isDriverOnline ? 'متصل' : 'غير متصل'}
+            </button>
+          </div>
+
+          {/* Greeting */}
+          <div>
+            <h1 className="text-[26px] font-bold text-white leading-tight">
+              {getGreeting()}
+              {user?.firstName && (
+                <span className="text-white/90"> {user.firstName}</span>
+              )}
+            </h1>
+            <p className="text-sm text-white/70 mt-1.5">
+              {new Date().toLocaleDateString('ar-EG', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+              })}
+            </p>
+          </div>
+        </div>
+      </div>
 
       <motion.div
         variants={containerVariants}
         initial="hidden"
         animate="visible"
-        className="flex-1 overflow-y-auto no-scrollbar pb-20"
+        className="flex-1 overflow-y-auto no-scrollbar pb-24 -mt-12 relative z-10"
       >
-        {/* Greeting Section */}
-        <motion.div variants={itemVariants} className="bg-app-dark px-4 pt-4 pb-8 rounded-b-[20px]">
-          <h2 className="text-[22px] font-semibold text-white leading-tight">
-            {getGreeting()},
-          </h2>
-          {user?.firstName && (
-            <h2 className="text-[22px] font-semibold text-white leading-tight">
-              {user.firstName}!
-            </h2>
-          )}
-          <p className="text-sm text-white/70 mt-1">
-            {new Date().toLocaleDateString('ar-EG', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric',
-            })}
-          </p>
-        </motion.div>
-
         {/* Stats Cards */}
-        <motion.div
-          variants={itemVariants}
-          className="grid grid-cols-4 gap-2 px-4 -mt-5"
-        >
-          {statCards.map((stat, i) => (
+        <motion.div variants={itemVariants} className="px-4 grid grid-cols-4 gap-2.5">
+          {[
+            { label: 'الإجمالي', value: displayStats.total, bg: 'bg-white', iconColor: 'text-gray-500', iconBg: 'bg-gray-100' },
+            { label: 'معلق', value: displayStats.pending, bg: 'bg-white', iconColor: 'text-emerald-600', iconBg: 'bg-emerald-50' },
+            { label: 'تم', value: displayStats.delivered, bg: 'bg-white', iconColor: 'text-blue-600', iconBg: 'bg-blue-50' },
+            ...(displayStats.failed > 0
+              ? [{ label: 'فشل', value: displayStats.failed, bg: 'bg-white', iconColor: 'text-red-500', iconBg: 'bg-red-50' }]
+              : []),
+          ].map((stat, i) => (
             <motion.div
               key={stat.label}
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: i * 0.08, duration: 0.3 }}
-              className="bg-white rounded-xl p-3 shadow-card flex flex-col items-center text-center"
+              transition={{ delay: i * 0.06, duration: 0.3 }}
+              className={`${stat.bg} rounded-2xl p-3 shadow-sm flex flex-col items-center text-center border border-gray-100`}
             >
-              <stat.icon size={18} className={stat.color} />
-              <span className="text-2xl font-bold text-app-text mt-1">{stat.value}</span>
-              <span className="text-xs text-app-text-secondary">{stat.label}</span>
+              <div className={`w-8 h-8 rounded-xl ${stat.iconBg} flex items-center justify-center mb-1.5`}>
+                <span className={`text-lg font-bold ${stat.iconColor}`}>{stat.value}</span>
+              </div>
+              <span className="text-[11px] text-gray-500 font-medium">{stat.label}</span>
             </motion.div>
           ))}
         </motion.div>
 
-        {/* Progress Section */}
-        <motion.div variants={itemVariants} className="mx-4 mt-4 bg-white rounded-xl p-4 shadow-card">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-app-text">تقدم اليوم</h3>
-            <span className="text-sm text-app-text-secondary">
-              {displayStats.delivered + displayStats.failed} من {displayStats.total}
+        {/* Progress Bar */}
+        <motion.div variants={itemVariants} className="mx-4 mt-4 bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-800">تقدم اليوم</h3>
+            <span className="text-xs text-gray-400 font-medium">
+              {displayStats.delivered + displayStats.failed} / {displayStats.total}
             </span>
           </div>
-          <div className="mt-3 h-2 bg-gray-200 rounded-full overflow-hidden">
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
             <motion.div
               initial={{ width: 0 }}
               animate={{
                 width: `${displayStats.total > 0 ? ((displayStats.delivered + displayStats.failed) / displayStats.total) * 100 : 0}%`,
               }}
               transition={{ duration: 0.8, ease: 'easeOut', delay: 0.3 }}
-              className="h-full bg-app-success rounded-full"
+              className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500"
             />
           </div>
-          <p className="text-sm text-app-success font-medium mt-2">
-            {displayStats.total > 0 ? Math.round(((displayStats.delivered + displayStats.failed) / displayStats.total) * 100) : 0}% نسبة النجاح
-          </p>
+          <div className="flex items-center justify-between mt-2">
+            <p className="text-xs text-emerald-600 font-semibold">
+              {displayStats.total > 0 ? Math.round(((displayStats.delivered + displayStats.failed) / displayStats.total) * 100) : 0}% نسبة النجاح
+            </p>
+            <div className="flex items-center gap-3 text-[11px] text-gray-400">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400" /> تم</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-300" /> متبقي</span>
+            </div>
+          </div>
         </motion.div>
 
+        {/* Active Delivery Card */}
+        {activeShipment && activePhase !== 'no_plan' && activePhase !== 'delivered' && activePhase !== 'plan_ready' && (
+          <motion.div variants={itemVariants} className="mx-4 mt-4">
+            <button
+              type="button"
+              onClick={() => {
+                selectShipment(activeShipment.id);
+                navigate(`/deliveries/${activeShipment.id}`);
+              }}
+              className="w-full bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl p-4 border border-emerald-100 text-right active:scale-[0.98] transition-transform"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500 flex items-center justify-center">
+                    <Truck size={16} className="text-white" />
+                  </div>
+                  <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">النقطة الحالية</span>
+                </div>
+                <ChevronLeft size={18} className="text-emerald-400" />
+              </div>
+              <h3 className="text-base font-bold text-gray-900 truncate" dir="auto" data-preserve-source-text>
+                {activeShipment.customerName ?? `#${activeShipment.id}`}
+              </h3>
+              {activeShipment.address && (
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <MapPin size={13} className="text-emerald-500 flex-shrink-0" />
+                  <p className="text-xs text-gray-500 truncate" dir="auto" data-preserve-source-text>
+                    {activeShipment.address}
+                  </p>
+                </div>
+              )}
+            </button>
+          </motion.div>
+        )}
+
         {/* Shift Workflow */}
-        <motion.div variants={itemVariants} className="mx-4 mt-4 bg-white rounded-xl p-4 shadow-card">
-          <div className="flex items-start justify-between gap-3">
+        <motion.div variants={itemVariants} className="mx-4 mt-4 bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-4">
             <div>
-              <p className="text-xs font-semibold text-app-text-secondary">خطة اليوم</p>
-              <h3 className="mt-1 text-lg font-semibold text-app-text">{currentWorkflowStep.label}</h3>
-              <p className="mt-1 text-sm leading-relaxed text-app-text-secondary">
-                {currentWorkflowStep.description}
-              </p>
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">خطة اليوم</p>
+              <h3 className="text-base font-bold text-gray-900 mt-0.5">{currentWorkflowStep.label}</h3>
             </div>
-            <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-600">
+            <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
+              activePhase === 'delivered'
+                ? 'bg-emerald-100 text-emerald-700'
+                : activePhase === 'no_plan'
+                ? 'bg-gray-100 text-gray-500'
+                : 'bg-emerald-50 text-emerald-600'
+            }`}>
               {activePhase === 'delivered'
                 ? 'مكتمل'
                 : activePhase === 'no_plan'
                 ? 'بدون خطة'
-                : activePhase === 'plan_ready'
-                ? 'جاهزة'
-                : `${Math.min(activeStepIndex + 1, workflowSteps.length)} / ${workflowSteps.length}`}
+                : `${Math.min(activeStepIndex + 1, workflowSteps.length)}/${workflowSteps.length}`}
             </span>
           </div>
 
-          <div className="mt-4 grid grid-cols-4 gap-2">
+          {/* Workflow Steps */}
+          <div className="flex items-start gap-1">
             {workflowSteps.map((step, index) => {
               const StepIcon = step.icon;
               const isDone = activePhase === 'delivered' || index < activeStepIndex;
               const isCurrent = index === activeStepIndex && activePhase !== 'delivered' && activePhase !== 'no_plan';
 
               return (
-                <div key={step.key} className="flex min-w-0 flex-col items-center gap-1 text-center">
+                <div key={step.key} className="flex-1 flex flex-col items-center gap-1.5 relative">
+                  {/* Connector line */}
+                  {index < workflowSteps.length - 1 && (
+                    <div className={`absolute top-4 left-[calc(50%+14px)] w-[calc(100%-28px)] h-0.5 ${
+                      isDone ? 'bg-emerald-300' : 'bg-gray-200'
+                    }`} />
+                  )}
                   <div
-                    className={`flex h-10 w-10 items-center justify-center rounded-xl border ${
+                    className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center transition-all ${
                       isDone
-                        ? 'border-success-200 bg-success-50 text-success-600'
+                        ? 'bg-emerald-500 text-white shadow-md shadow-emerald-200'
                         : isCurrent
-                        ? 'border-app-accent bg-app-light text-app-accent shadow-sm'
-                        : 'border-gray-200 bg-brand-25 text-gray-400'
+                        ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-300 ring-4 ring-emerald-100'
+                        : 'bg-gray-100 text-gray-400'
                     }`}
                   >
-                    {isDone ? <CheckCircle size={18} /> : <StepIcon size={18} />}
+                    {isDone ? <CheckCircle size={15} /> : <StepIcon size={15} />}
                   </div>
-                  <span className={`min-h-8 text-[10px] font-semibold leading-4 ${isCurrent ? 'text-app-text' : 'text-app-text-secondary'}`}>
+                  <span className={`text-[10px] font-semibold text-center leading-tight ${
+                    isCurrent ? 'text-emerald-700' : isDone ? 'text-gray-600' : 'text-gray-400'
+                  }`}>
                     {step.label}
                   </span>
                 </div>
               );
             })}
+            {/* Completed state extra dot */}
+            {activePhase === 'delivered' && (
+              <div className="flex-1 flex flex-col items-center gap-1.5">
+                <div className="relative z-10 w-8 h-8 rounded-full flex items-center justify-center bg-emerald-500 text-white shadow-md shadow-emerald-200">
+                  <CheckCircle size={15} />
+                </div>
+                <span className="text-[10px] font-semibold text-emerald-700">نهاية</span>
+              </div>
+            )}
           </div>
 
-          {activeShipment && activePhase !== 'no_plan' && activePhase !== 'delivered' && (
-            <div className="mt-4 rounded-xl bg-brand-25 p-3">
-              <p className="text-xs font-semibold text-app-text-secondary">النقطة الحالية</p>
-              <p className="mt-1 truncate text-sm font-semibold text-app-text" dir="auto" data-preserve-source-text>
-                {activeShipment.customerName ?? `#${activeShipment.id}`}
-              </p>
-              {activeShipment.address && (
-                <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-app-text-secondary" dir="auto" data-preserve-source-text>
-                  {activeShipment.address}
-                </p>
-              )}
-            </div>
-          )}
+          {/* Current Step Description */}
+          <p className="text-xs text-gray-500 mt-4 text-center leading-relaxed">
+            {currentWorkflowStep.description}
+          </p>
 
+          {/* Action Buttons */}
           <div className="mt-4 flex gap-2">
             {activePlanId && activePhase !== 'no_plan' && activePhase !== 'delivered' && (
               <button
                 type="button"
                 onClick={() => navigate(`/plan/${activePlanId}/reorder`)}
-                className="h-12 rounded-xl border border-gray-200 px-4 text-sm font-semibold text-app-text-secondary active:scale-95 transition-transform"
+                className="h-12 rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-500 active:scale-95 transition-transform flex items-center gap-1.5"
               >
-                ترتيب الخط
+                <RotateCcw size={14} />
+                ترتيب
               </button>
             )}
             <button
               type="button"
               onClick={() => void handleWorkflowAction()}
               disabled={!canUseWorkflowAction}
-              className={`h-12 flex-1 rounded-xl px-4 text-sm font-semibold text-white active:scale-[0.97] transition-transform ${
+              className={`h-12 flex-1 rounded-xl px-4 text-sm font-bold text-white active:scale-[0.97] transition-all flex items-center justify-center gap-2 ${
                 !canUseWorkflowAction
-                  ? 'bg-gray-400'
+                  ? 'bg-gray-300 cursor-not-allowed'
                   : activePhase === 'out_for_delivery'
-                  ? 'bg-app-accent'
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 shadow-lg shadow-emerald-200'
                   : activePhase === 'delivered'
-                  ? 'bg-app-success'
-                  : 'bg-app-dark'
+                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 shadow-lg shadow-blue-200'
+                  : 'bg-gradient-to-r from-gray-800 to-gray-900 shadow-lg shadow-gray-200'
               } ${isWorkflowSubmitting ? 'opacity-70' : ''}`}
             >
+              {activePhase === 'assigned' && <Package size={16} />}
+              {activePhase === 'starting_shift' && <FileCheck2 size={16} />}
+              {activePhase === 'picked_up' && <Truck size={16} />}
+              {activePhase === 'out_for_delivery' && <MapPin size={16} />}
+              {activePhase === 'delivered' && <CheckCircle size={16} />}
               {workflowActionLabel}
             </button>
           </div>
         </motion.div>
 
-        <motion.div variants={itemVariants} className="hidden">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold text-app-text">حالة الوردية</h3>
-              <p className="mt-1 text-sm text-app-text-secondary">
-                {activePhase === 'assigned'
-                  ? 'تسجيل الوصول عند نقطة الاستلام'
-                  : activePhase === 'starting_shift'
-                  ? 'تأكيد استلام كل الشحنات'
-                  : activePhase === 'picked_up'
-                  ? 'جاهز لبدء خط التسليم'
-                  : activePhase === 'out_for_delivery'
-                  ? 'خارج للتسليم'
-                  : activePhase === 'delivered'
-                  ? 'تم إنهاء التسليم'
-                  : 'لا توجد خطة عمل نشطة'}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {activePlanId && activePhase !== 'no_plan' && activePhase !== 'delivered' && (
-                <button
-                  type="button"
-                  onClick={() => navigate(`/plan/${activePlanId}/reorder`)}
-                  className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-app-text-secondary hover:bg-brand-25 active:scale-95 transition-all"
-                >
-                  ترتيب
-                </button>
-              )}
-              <button
-              type="button"
-              onClick={() => void handleWorkflowAction()}
-              disabled={!canUseWorkflowAction}
-              className={`rounded-xl px-4 py-2 text-sm font-semibold text-white active:scale-[0.97] transition-transform ${
-                activePhase === 'delivered' || !canUseWorkflowAction
-                  ? 'bg-gray-400'
-                  : activePhase === 'out_for_delivery'
-                  ? 'bg-app-accent'
-                  : 'bg-app-dark'
-              } ${isWorkflowSubmitting ? 'opacity-70' : ''}`}
-            >
-              {activePhase === 'assigned'
-                ? 'بداية الوردية'
-                : activePhase === 'starting_shift'
-                ? 'تم الاستلام'
-                : activePhase === 'picked_up'
-                ? 'خارج للتسليم'
-                : activePhase === 'out_for_delivery'
-                ? 'فتح الخريطة'
-                : 'تم'}
-            </button>
-            </div>
-          </div>
-        </motion.div>
-
+        {/* Outstanding Collection Warning */}
         {outstandingCollectionAmount > 0 && (
           <motion.div
             variants={itemVariants}
-            className="mx-4 mt-4 rounded-xl border border-error-200 bg-error-50 p-4 shadow-card"
+            className="mx-4 mt-4 rounded-2xl border border-red-100 bg-red-50 p-4"
           >
             <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold text-error-700">تحصيل غير مسلم</h3>
-                <p className="mt-1 text-xs text-error-600">
-                  يبقى بالسالب حتى يتم تسليمه وتأكيده من المدير
-                </p>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
+                  <DollarSign size={18} className="text-red-500" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-red-700">تحصيل غير مسلم</h3>
+                  <p className="text-[11px] text-red-400 mt-0.5">
+                    يبقى بالسالب حتى يتم تسليمه
+                  </p>
+                </div>
               </div>
-              <span className="rounded-full bg-white px-3 py-1 text-sm font-bold text-error-700">
+              <span className="rounded-xl bg-white px-3 py-1.5 text-sm font-bold text-red-600 border border-red-100">
                 -{new Intl.NumberFormat('ar-EG', {
                   style: 'currency',
                   currency: collectionCurrency,
@@ -717,17 +761,18 @@ export default function DashboardScreen() {
           </motion.div>
         )}
 
+        {/* Live Map */}
         {activePhase === 'out_for_delivery' && (
-          <motion.div variants={itemVariants} className="mx-4 mt-4 bg-white rounded-xl p-4 shadow-card">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-app-text">الخريطة المباشرة</h3>
+          <motion.div variants={itemVariants} className="mx-4 mt-4 bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-800">الخريطة المباشرة</h3>
               <button
                 type="button"
                 onClick={() => {
                   setActiveTab('route');
                   navigate('/route');
                 }}
-                className="text-sm font-medium text-app-accent"
+                className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg"
               >
                 خط السير
               </button>
@@ -738,12 +783,12 @@ export default function DashboardScreen() {
 
         {/* Quick Actions */}
         <motion.div variants={itemVariants} className="px-4 mt-4">
-          <h3 className="text-lg font-semibold text-app-text mb-3">إجراءات سريعة</h3>
-          <div className="grid grid-cols-2 gap-3">
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">إجراءات سريعة</h3>
+          <div className="grid grid-cols-2 gap-2.5">
             {[
-              { icon: AlertTriangle, label: 'SOS', action: handleSos, iconClassName: 'text-app-error' },
-              { icon: PhoneCall, label: 'الاتصال بالعميل', action: handleCallCustomer, iconClassName: 'text-app-dark' },
-              { icon: FileCheck2, label: 'POD', action: handleOpenPod, iconClassName: 'text-app-dark' },
+              { icon: AlertTriangle, label: 'SOS', action: handleSos, iconBg: 'bg-red-50', iconColor: 'text-red-500', ringColor: 'ring-red-100' },
+              { icon: PhoneCall, label: 'اتصال بالعميل', action: handleCallCustomer, iconBg: 'bg-blue-50', iconColor: 'text-blue-600', ringColor: 'ring-blue-100' },
+              { icon: FileCheck2, label: 'POD', action: handleOpenPod, iconBg: 'bg-purple-50', iconColor: 'text-purple-600', ringColor: 'ring-purple-100' },
               {
                 icon: isDriverOnline ? Wifi : WifiOff,
                 label: isDriverOnline ? 'متصل' : 'غير متصل',
@@ -751,17 +796,20 @@ export default function DashboardScreen() {
                   setDriverOnline(!isDriverOnline);
                   handleSync();
                 },
-                iconClassName: isDriverOnline ? 'text-success-600' : 'text-app-error',
-                buttonClassName: isDriverOnline ? 'ring-1 ring-success-200' : 'ring-1 ring-error-200',
+                iconBg: isDriverOnline ? 'bg-emerald-50' : 'bg-orange-50',
+                iconColor: isDriverOnline ? 'text-emerald-500' : 'text-orange-500',
+                ringColor: isDriverOnline ? 'ring-emerald-100' : 'ring-orange-100',
               },
             ].map((action) => (
               <button
                 key={action.label}
                 onClick={action.action}
-                className={`bg-white rounded-xl p-4 shadow-card flex flex-col items-center gap-2 active:scale-[0.97] transition-transform ${action.buttonClassName ?? ''}`}
+                className={`bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col items-center gap-2.5 active:scale-[0.97] transition-all ring-1 ${action.ringColor}`}
               >
-                <action.icon size={26} className={action.iconClassName} />
-                <span className="text-sm font-semibold text-app-text">{action.label}</span>
+                <div className={`w-11 h-11 rounded-xl ${action.iconBg} flex items-center justify-center`}>
+                  <action.icon size={20} className={action.iconColor} />
+                </div>
+                <span className="text-xs font-semibold text-gray-700">{action.label}</span>
               </button>
             ))}
           </div>
@@ -771,15 +819,15 @@ export default function DashboardScreen() {
         {priorityShipments.length > 0 && (
           <motion.div variants={itemVariants} className="px-4 mt-5">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-semibold text-app-text">التسليمات ذات الأولوية</h3>
+              <h3 className="text-sm font-semibold text-gray-800">التسليمات ذات الأولوية</h3>
               <button
                 onClick={() => { setActiveTab('deliveries'); navigate('/deliveries'); }}
-                className="text-sm text-app-accent font-medium"
+                className="text-xs text-emerald-600 font-semibold bg-emerald-50 px-2.5 py-1 rounded-lg"
               >
                 عرض الكل
               </button>
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2.5">
               {priorityShipments.map((shipment) => (
                 <ShipmentListItem
                   key={shipment.id}
@@ -795,50 +843,55 @@ export default function DashboardScreen() {
         )}
 
         {/* Recent Activity */}
-        <motion.div variants={itemVariants} className="px-4 mt-5 mb-6">
-          <h3 className="text-lg font-semibold text-app-text mb-3">آخر النشاط</h3>
-          <div className="bg-white rounded-xl shadow-card overflow-hidden">
-            {recentActivity.map((activity, i) => (
-              <div
-                key={`${activity.shipmentId}-${i}`}
-                className={`flex items-start gap-3 px-4 py-3 ${
-                  i < recentActivity.length - 1 ? 'border-b border-gray-100' : ''
-                }`}
-              >
+        {recentActivity.length > 0 && (
+          <motion.div variants={itemVariants} className="px-4 mt-5 mb-6">
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">آخر النشاط</h3>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              {recentActivity.map((activity, i) => (
                 <div
-                  className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${
-                    activity.status === 'delivered'
-                      ? 'bg-app-success'
-                      : activity.status === 'failed'
-                      ? 'bg-app-error'
-                      : activity.status === 'in_transit'
-                      ? 'bg-app-warning'
-                      : 'bg-app-accent'
+                  key={`${activity.shipmentId}-${i}`}
+                  className={`flex items-start gap-3 px-4 py-3 ${
+                    i < recentActivity.length - 1 ? 'border-b border-gray-50' : ''
                   }`}
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-app-text truncate">
-                    {activity.action.replace('تم تغيير الحالة إلى', '').replace('Status changed to', '').trim()}
-                    {activity.shipmentCustomer && (
-                      <>
-                        {' - '}
-                        <span className="font-medium" dir="auto" data-preserve-source-text>{activity.shipmentCustomer}</span>
-                      </>
-                    )}
-                  </p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {new Date(activity.timestamp).toLocaleTimeString('ar-EG', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </p>
+                >
+                  <div className="mt-1.5 flex-shrink-0">
+                    <div
+                      className={`w-2.5 h-2.5 rounded-full ${
+                        activity.status === 'delivered'
+                          ? 'bg-emerald-400'
+                          : activity.status === 'failed'
+                          ? 'bg-red-400'
+                          : activity.status === 'in_transit'
+                          ? 'bg-amber-400'
+                          : 'bg-blue-400'
+                      }`}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-700 truncate">
+                      {activity.action.replace('تم تغيير الحالة إلى', '').replace('Status changed to', '').trim()}
+                      {activity.shipmentCustomer && (
+                        <>
+                          {' - '}
+                          <span className="font-semibold" dir="auto" data-preserve-source-text>{activity.shipmentCustomer}</span>
+                        </>
+                      )}
+                    </p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {new Date(activity.timestamp).toLocaleTimeString('ar-EG', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
       </motion.div>
 
+      {/* Collection Bottom Sheet */}
       <BottomSheet
         isOpen={showCollectionSheet}
         onClose={() => {
@@ -865,7 +918,6 @@ export default function DashboardScreen() {
             </div>
           </div>
 
-          {/* Photo Capture */}
           <div>
             <label className="text-sm font-medium text-app-text">صورة الإيصال</label>
             <div
@@ -933,7 +985,6 @@ export default function DashboardScreen() {
             </div>
           </div>
 
-          {/* Notes */}
           <div>
             <label className="text-sm font-medium text-app-text">ملاحظات (اختياري)</label>
             <textarea

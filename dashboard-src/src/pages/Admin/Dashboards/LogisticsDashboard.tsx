@@ -22,8 +22,15 @@ import type { DateRangeValue } from "../../../lib/date-range";
 import AdminLiveTrackingMap, {
   type MapDriverLocation,
   type MapPlanRoute,
+  type MapPrimaryWarehouse,
   type MapShipmentStop,
 } from "../../../components/admin/AdminLiveTrackingMap";
+
+const HORECA_MARG_WAREHOUSE: MapPrimaryWarehouse = {
+  latitude: 30.1592333,
+  longitude: 31.357159,
+  name: "Horeca Marg",
+};
 
 function formatEGP(value: number): string {
   return new Intl.NumberFormat("en-EG", {
@@ -481,10 +488,11 @@ function useMapData({ range }: DateRangeProps) {
       const planIds = (plans ?? []).map((p) => p.id);
       let shipmentsByPlan = new Map<string, MapShipmentStop[]>();
       const warehouseByPlan = new Map<string, string>();
+      const warehouseCoordByPlan = new Map<string, { latitude: number; longitude: number }>();
       if (planIds.length > 0) {
         const { data: shipments, error: shipErr } = await supabase
           .from("logistics_shipments")
-          .select("id, plan_id, customer_name, shipment_status, customer_latitude, customer_longitude, warehouse_name")
+          .select("id, plan_id, customer_name, shipment_status, customer_latitude, customer_longitude, warehouse_name, warehouse_latitude, warehouse_longitude")
           .in("plan_id", planIds)
           .not("customer_latitude", "is", null)
           .not("customer_longitude", "is", null);
@@ -508,6 +516,13 @@ function useMapData({ range }: DateRangeProps) {
           if (!warehouseByPlan.has(s.plan_id) && s.warehouse_name) {
             warehouseByPlan.set(s.plan_id, s.warehouse_name);
           }
+          if (!warehouseCoordByPlan.has(s.plan_id)) {
+            const wLat = Number(s.warehouse_latitude);
+            const wLng = Number(s.warehouse_longitude);
+            if (!Number.isNaN(wLat) && !Number.isNaN(wLng) && wLat !== 0 && wLng !== 0) {
+              warehouseCoordByPlan.set(s.plan_id, { latitude: wLat, longitude: wLng });
+            }
+          }
         }
       }
 
@@ -530,28 +545,21 @@ function useMapData({ range }: DateRangeProps) {
         const stops = shipmentsByPlan.get(plan.id) ?? [];
         if (stops.length === 0) continue;
         const driver = liveDriverMap.get(plan.assigned_profile_id ?? "");
-
-        // Compute centroid of all customer locations as warehouse proxy
-        let centroidLat = 0;
-        let centroidLng = 0;
-        if (stops.length > 0) {
-          centroidLat = stops.reduce((sum, s) => sum + s.latitude, 0) / stops.length;
-          centroidLng = stops.reduce((sum, s) => sum + s.longitude, 0) / stops.length;
-        }
+        const warehouseCoord = warehouseCoordByPlan.get(plan.id) ?? HORECA_MARG_WAREHOUSE;
 
         planRoutes.push({
           planId: plan.id,
           planReference: plan.plan_reference ?? plan.id,
           driverId: plan.assigned_profile_id ?? "",
           driverName: driver?.driverName ?? "سائق",
-          warehouseName: warehouseByPlan.get(plan.id) ?? "",
-          warehouseLatitude: centroidLat,
-          warehouseLongitude: centroidLng,
+          warehouseName: warehouseByPlan.get(plan.id) ?? HORECA_MARG_WAREHOUSE.name,
+          warehouseLatitude: warehouseCoord.latitude,
+          warehouseLongitude: warehouseCoord.longitude,
           stops,
         });
       }
 
-      return { drivers, planRoutes };
+      return { drivers, planRoutes, primaryWarehouse: HORECA_MARG_WAREHOUSE };
     },
     refetchInterval: 3000,
   });
@@ -875,7 +883,7 @@ function RouteMapPlaceholder({ range }: DateRangeProps) {
       {isLoading ? (
         <SkeletonBlock className="h-[500px]" />
       ) : (
-        <AdminLiveTrackingMap drivers={data?.drivers ?? []} plans={data?.planRoutes ?? []} />
+        <AdminLiveTrackingMap drivers={data?.drivers ?? []} plans={data?.planRoutes ?? []} primaryWarehouse={data?.primaryWarehouse} />
       )}
     </SectionCard>
   );

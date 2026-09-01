@@ -64,9 +64,16 @@ export type MapPlanRoute = {
   stops: MapShipmentStop[];
 };
 
+export type MapPrimaryWarehouse = {
+  latitude: number;
+  longitude: number;
+  name: string;
+};
+
 type Props = {
   drivers: MapDriverLocation[];
   plans: MapPlanRoute[];
+  primaryWarehouse?: MapPrimaryWarehouse | null;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -229,6 +236,17 @@ function FitBounds({ bounds }: { bounds: LatLngBoundsExpression }) {
     hasFit.current = true;
     map.fitBounds(bounds, { padding: [56, 56], maxZoom: 14 });
   }, [bounds, map]);
+  return null;
+}
+
+function SingleWarehouseFocus({ center }: { center: LatLngExpression }) {
+  const map = useMap();
+  const hasFit = useRef(false);
+  useEffect(() => {
+    if (hasFit.current) return;
+    hasFit.current = true;
+    map.setView(center, 13, { animate: false });
+  }, [center, map]);
   return null;
 }
 
@@ -506,7 +524,7 @@ function DriverCard({
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-function TrackingMapInner({ drivers, plans }: Props) {
+function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
   const [tileMode, setTileMode] = useState<MapTileMode>("map");
   const [fullscreen, setFullscreen] = useState(false);
@@ -610,8 +628,6 @@ function TrackingMapInner({ drivers, plans }: Props) {
     return pts;
   }, [filteredDrivers, filteredPlans]);
 
-  const bounds = allCoords.length > 0 ? (allCoords as LatLngBoundsExpression) : undefined;
-
   const totalStats = useMemo(() => {
     const stops = driversWithPlans.reduce((sum, d) => sum + d.totalStops, 0);
     const dist = driversWithPlans.reduce((sum, d) => sum + d.totalDist, 0);
@@ -619,6 +635,9 @@ function TrackingMapInner({ drivers, plans }: Props) {
   }, [driversWithPlans, plansWithSortedStops]);
 
   const mainWarehouse = useMemo(() => {
+    if (primaryWarehouse) {
+      return { latitude: primaryWarehouse.latitude, longitude: primaryWarehouse.longitude, name: primaryWarehouse.name || "المخزن الرئيسي" };
+    }
     if (plansWithSortedStops.length === 0) return null;
     const nameCount = new Map<string, number>();
     for (const p of plansWithSortedStops) {
@@ -633,9 +652,9 @@ function TrackingMapInner({ drivers, plans }: Props) {
     const lat = plansWithSortedStops.reduce((sum, p) => sum + p.warehouseLatitude, 0) / plansWithSortedStops.length;
     const lng = plansWithSortedStops.reduce((sum, p) => sum + p.warehouseLongitude, 0) / plansWithSortedStops.length;
     return { latitude: lat, longitude: lng, name: dominantName || "المخزن الرئيسي" };
-  }, [plansWithSortedStops]);
+  }, [plansWithSortedStops, primaryWarehouse]);
 
-  if (allCoords.length === 0) {
+  if (allCoords.length === 0 && !mainWarehouse) {
     return (
       <div className="flex h-80 items-center justify-center rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900/60 dark:to-gray-800/60 text-sm text-gray-400 dark:text-gray-500">
         <div className="text-center">
@@ -643,11 +662,14 @@ function TrackingMapInner({ drivers, plans }: Props) {
             <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
             <circle cx="12" cy="10" r="3" />
           </svg>
-          لا توجد خطط نشطة أو سائقين متاحين حاليًا
+          لا توجد بيانات لعرضها حاليًا
         </div>
       </div>
     );
   }
+
+  const mapCenter = allCoords.length > 0 ? allCoords[0] : ([mainWarehouse?.latitude ?? 0, mainWarehouse?.longitude ?? 0] as LatLngExpression);
+  const mapBounds = allCoords.length > 0 ? (allCoords as LatLngBoundsExpression) : undefined;
 
   return (
     <div
@@ -730,7 +752,7 @@ function TrackingMapInner({ drivers, plans }: Props) {
       {/* Map */}
       <div className="flex-1 relative">
         <MapContainer
-          center={allCoords[0]}
+          center={mapCenter}
           zoom={12}
           scrollWheelZoom={true}
           style={{ height: "100%", width: "100%" }}
@@ -741,7 +763,7 @@ function TrackingMapInner({ drivers, plans }: Props) {
             url={activeTile.url}
             maxZoom={activeTile.id === "map" ? 19 : 18}
           />
-          {bounds && <FitBounds bounds={bounds} />}
+          {mapBounds ? <FitBounds bounds={mapBounds} /> : mainWarehouse ? <SingleWarehouseFocus center={mapCenter as LatLngExpression} /> : null}
 
           {/* Route lines */}
           {filteredPlans.map((plan) => {

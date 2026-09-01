@@ -1,7 +1,18 @@
 ﻿import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ClipboardList, Package, CheckCircle, Clock, ScanBarcode, Printer } from 'lucide-react';
+import {
+  ClipboardList,
+  Package,
+  CheckCircle,
+  Clock,
+  ScanBarcode,
+  Printer,
+  AlertTriangle,
+  ChevronLeft,
+  Truck,
+  Warehouse,
+} from 'lucide-react';
 import { usePlanStore } from '../stores/planStore';
 import { useUIStore } from '../stores/uiStore';
 import { useAuthStore } from '../stores/authStore';
@@ -10,12 +21,12 @@ import PlanCard from '../components/PlanCard';
 
 const containerVariants = {
   hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.05 } },
+  visible: { opacity: 1, transition: { staggerChildren: 0.06 } },
 };
 
 const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
+  hidden: { opacity: 0, y: 16 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.35 } },
 };
 
 export default function DashboardScreen() {
@@ -42,66 +53,183 @@ export default function DashboardScreen() {
     return 'مساء الخير';
   };
 
-  const recentPlans = activePlans.slice(0, 5);
+  const recentPlans = activePlans.slice(0, 3);
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-100">
+    <div className="flex flex-col min-h-screen bg-[#f0f4f3]">
       <AppHeader />
-      <motion.div variants={containerVariants} initial="hidden" animate="visible" className="flex-1 overflow-y-auto no-scrollbar pb-20">
-        {/* Greeting */}
-        <motion.div variants={itemVariants} className="bg-app-dark px-4 pt-4 pb-8 rounded-b-[20px]">
-          <h2 className="text-[22px] font-semibold text-white leading-tight">{getGreeting()},</h2>
-          {user?.full_name && <h2 className="text-[22px] font-semibold text-white leading-tight">{user.full_name}!</h2>}
-          <p className="text-sm text-white/70 mt-1">{new Date().toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+      <motion.div
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        className="flex-1 overflow-y-auto no-scrollbar pb-24"
+      >
+        {/* Hero Header */}
+        <motion.div
+          variants={itemVariants}
+          className="relative bg-gradient-to-br from-emerald-700 via-emerald-600 to-teal-600 px-5 pt-5 pb-10 overflow-hidden"
+        >
+          {/* Decorative circles */}
+          <div className="absolute -top-10 -left-10 w-40 h-40 rounded-full bg-white/5" />
+          <div className="absolute -bottom-16 -right-16 w-56 h-56 rounded-full bg-white/5" />
+          <div className="absolute top-8 right-8 w-20 h-20 rounded-full bg-white/5" />
+
+          <div className="relative z-10">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center border border-white/20">
+                <Warehouse size={24} className="text-white" />
+              </div>
+              <div>
+                <h1 className="text-[15px] text-white/70 leading-tight">{getGreeting()}</h1>
+                {user?.full_name && (
+                  <h2 className="text-xl font-bold text-white leading-tight">{user.full_name}</h2>
+                )}
+              </div>
+            </div>
+            <p className="text-[13px] text-white/60 mt-1">
+              {new Date().toLocaleDateString('ar-EG', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+              })}
+            </p>
+          </div>
         </motion.div>
 
-        {/* Stats */}
-        <motion.div variants={itemVariants} className="grid grid-cols-4 gap-2 px-4 -mt-5">
-          {[
-            { label: 'الإجمالي', value: stats.total, icon: ClipboardList, color: 'text-gray-500' },
-            { label: 'جديد', value: stats.pending, icon: Clock, color: 'text-app-accent' },
-            { label: 'جاهز', value: stats.ready, icon: CheckCircle, color: 'text-app-success' },
-            { label: 'قيد التجهيز', value: stats.preparing, icon: Package, color: 'text-warning-600' },
-          ].map((stat, i) => (
-            <motion.div key={stat.label} initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: i * 0.08, duration: 0.3 }} className="bg-white rounded-xl p-3 shadow-card flex flex-col items-center text-center">
-              <stat.icon size={18} className={stat.color} />
-              <span className="text-2xl font-bold text-app-text mt-1">{stat.value}</span>
-              <span className="text-xs text-app-text-secondary">{stat.label}</span>
-            </motion.div>
-          ))}
+        {/* Stats Grid */}
+        <motion.div variants={itemVariants} className="px-4 -mt-6 relative z-10">
+          <div className="grid grid-cols-2 gap-3">
+            {/* Active Plans */}
+            <button
+              onClick={() => { setActiveTab('plans'); navigate('/plans'); }}
+              className="bg-white rounded-2xl p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] text-right active:scale-[0.97] transition-transform"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center">
+                  <ClipboardList size={20} className="text-emerald-600" />
+                </div>
+                <ChevronLeft size={16} className="text-gray-300" />
+              </div>
+              <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
+              <p className="text-[12px] text-gray-400 mt-0.5">خططة نشطة</p>
+            </button>
+
+            {/* Preparing */}
+            <div className="bg-white rounded-2xl p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)]">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center mb-3">
+                <Package size={20} className="text-amber-500" />
+              </div>
+              <p className="text-2xl font-bold text-gray-900">{stats.preparing}</p>
+              <p className="text-[12px] text-gray-400 mt-0.5">قيد التجهيز</p>
+            </div>
+
+            {/* Ready */}
+            <div className="bg-white rounded-2xl p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)]">
+              <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center mb-3">
+                <CheckCircle size={20} className="text-green-500" />
+              </div>
+              <p className="text-2xl font-bold text-gray-900">{stats.ready}</p>
+              <p className="text-[12px] text-gray-400 mt-0.5">جاهز للتسليم</p>
+            </div>
+
+            {/* Pending */}
+            <div className="bg-white rounded-2xl p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)]">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center mb-3">
+                <Clock size={20} className="text-blue-500" />
+              </div>
+              <p className="text-2xl font-bold text-gray-900">{stats.pending}</p>
+              <p className="text-[12px] text-gray-400 mt-0.5">بانتظار البدء</p>
+            </div>
+          </div>
         </motion.div>
 
-        {/* Missed & Completed counts */}
+        {/* Missed & Completed Banner */}
         {(stats.missed > 0 || stats.completed > 0) && (
-          <motion.div variants={itemVariants} className="px-4 mt-3 flex gap-2">
-            {stats.missed > 0 && (
-              <div className="flex-1 bg-orange-50 rounded-xl p-2.5 text-center">
-                <span className="text-lg font-bold text-orange-600">{stats.missed}</span>
-                <span className="text-xs text-orange-500 block">فائتة</span>
-              </div>
-            )}
-            {stats.completed > 0 && (
-              <div className="flex-1 bg-gray-100 rounded-xl p-2.5 text-center">
-                <span className="text-lg font-bold text-gray-500">{stats.completed}</span>
-                <span className="text-xs text-gray-400 block">مكتملة</span>
-              </div>
-            )}
+          <motion.div variants={itemVariants} className="px-4 mt-3">
+            <div className="flex gap-2">
+              {stats.missed > 0 && (
+                <button
+                  onClick={() => { setActiveTab('plans'); navigate('/plans'); }}
+                  className="flex-1 bg-gradient-to-r from-orange-50 to-orange-100/50 rounded-xl p-3 flex items-center gap-3 active:scale-[0.97] transition-transform border border-orange-200/50"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-orange-100 flex items-center justify-center shrink-0">
+                    <AlertTriangle size={18} className="text-orange-500" />
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-orange-700">{stats.missed}</p>
+                    <p className="text-[11px] text-orange-400">خطة فائتة</p>
+                  </div>
+                </button>
+              )}
+              {stats.completed > 0 && (
+                <button
+                  onClick={() => { setActiveTab('plans'); navigate('/plans'); }}
+                  className="flex-1 bg-gradient-to-r from-gray-50 to-gray-100/50 rounded-xl p-3 flex items-center gap-3 active:scale-[0.97] transition-transform border border-gray-200/50"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+                    <CheckCircle size={18} className="text-gray-400" />
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-gray-600">{stats.completed}</p>
+                    <p className="text-[11px] text-gray-400">خطة مكتملة</p>
+                  </div>
+                </button>
+              )}
+            </div>
           </motion.div>
         )}
 
-        {/* Action Cards */}
+        {/* Quick Actions */}
         <motion.div variants={itemVariants} className="px-4 mt-5">
-          <h3 className="text-lg font-semibold text-app-text mb-3">إجراءات سريعة</h3>
+          <h3 className="text-[15px] font-bold text-gray-900 mb-3">إجراءات سريعة</h3>
           <div className="grid grid-cols-2 gap-3">
             {[
-              { icon: ClipboardList, label: 'الخطط', action: () => { setActiveTab('plans'); navigate('/plans'); }, color: 'text-app-dark' },
-              { icon: ScanBarcode, label: 'مسح سريع', action: () => navigate('/scanner'), color: 'text-app-accent' },
-              { icon: Package, label: 'المخزون', action: () => { setActiveTab('inventory'); navigate('/inventory'); }, color: 'text-app-success' },
-              { icon: Printer, label: 'طباعة', action: () => { setActiveTab('plans'); navigate('/plans/print'); }, color: 'text-app-warning' },
+              {
+                icon: ClipboardList,
+                label: 'الخطط',
+                sub: `${stats.total} خطة نشطة`,
+                action: () => { setActiveTab('plans'); navigate('/plans'); },
+                bg: 'bg-emerald-50',
+                iconColor: 'text-emerald-600',
+              },
+              {
+                icon: ScanBarcode,
+                label: 'مسح سريع',
+                sub: 'مسح باركود',
+                action: () => navigate('/scanner'),
+                bg: 'bg-violet-50',
+                iconColor: 'text-violet-600',
+              },
+              {
+                icon: Package,
+                label: 'المخزون',
+                sub: 'عرض المنتجات',
+                action: () => { setActiveTab('inventory'); navigate('/inventory'); },
+                bg: 'bg-sky-50',
+                iconColor: 'text-sky-600',
+              },
+              {
+                icon: Printer,
+                label: 'طباعة',
+                sub: 'قوائم التجهيز',
+                action: () => { setActiveTab('plans'); navigate('/plans/print'); },
+                bg: 'bg-rose-50',
+                iconColor: 'text-rose-600',
+              },
             ].map((card) => (
-              <button key={card.label} onClick={card.action} className="bg-white rounded-xl p-4 shadow-card flex flex-col items-center gap-2 active:scale-[0.97] transition-transform">
-                <card.icon size={26} className={card.color} />
-                <span className="text-sm font-semibold text-app-text">{card.label}</span>
+              <button
+                key={card.label}
+                onClick={card.action}
+                className="bg-white rounded-2xl p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] flex items-center gap-3 text-right active:scale-[0.97] transition-transform"
+              >
+                <div className={`w-12 h-12 rounded-xl ${card.bg} flex items-center justify-center shrink-0`}>
+                  <card.icon size={22} className={card.iconColor} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[14px] font-bold text-gray-900">{card.label}</p>
+                  <p className="text-[11px] text-gray-400 truncate">{card.sub}</p>
+                </div>
               </button>
             ))}
           </div>
@@ -109,16 +237,40 @@ export default function DashboardScreen() {
 
         {/* Recent Plans */}
         {recentPlans.length > 0 && (
-          <motion.div variants={itemVariants} className="px-4 mt-5 mb-6">
+          <motion.div variants={itemVariants} className="px-4 mt-5 mb-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-semibold text-app-text">آخر الخطط</h3>
-              <button onClick={() => { setActiveTab('plans'); navigate('/plans'); }} className="text-sm text-app-accent font-medium">عرض الكل</button>
+              <h3 className="text-[15px] font-bold text-gray-900">آخر الخطط</h3>
+              <button
+                onClick={() => { setActiveTab('plans'); navigate('/plans'); }}
+                className="flex items-center gap-1 text-[13px] text-emerald-600 font-semibold"
+              >
+                عرض الكل
+                <ChevronLeft size={14} />
+              </button>
             </div>
             <div className="flex flex-col gap-3">
               {recentPlans.map((plan) => (
-                <PlanCard key={plan.plan_id} plan={plan} onClick={() => { selectPlan(plan.plan_id); navigate(`/plans/${plan.plan_id}`); }} />
+                <PlanCard
+                  key={plan.plan_id}
+                  plan={plan}
+                  onClick={() => {
+                    selectPlan(plan.plan_id);
+                    navigate(`/plans/${plan.plan_id}`);
+                  }}
+                />
               ))}
             </div>
+          </motion.div>
+        )}
+
+        {/* Empty state */}
+        {activePlans.length === 0 && !usePlanStore.getState().isLoading && (
+          <motion.div variants={itemVariants} className="px-4 mt-8 text-center">
+            <div className="w-20 h-20 rounded-3xl bg-emerald-50 flex items-center justify-center mx-auto mb-4">
+              <Truck size={36} className="text-emerald-300" />
+            </div>
+            <p className="text-[15px] font-semibold text-gray-700">مفيش خطط نشطة حاليًا</p>
+            <p className="text-[13px] text-gray-400 mt-1">الخطط الجديدة هتظهر هنا لما تتسجل</p>
           </motion.div>
         )}
       </motion.div>

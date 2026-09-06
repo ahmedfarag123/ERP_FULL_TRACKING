@@ -398,6 +398,8 @@ function mapShipment(detail: DriverShipmentDetail): Shipment {
   const latestFailure = status === 'failed' ? eventHistory[eventHistory.length - 1] : undefined;
   const lat = shipment.customer?.lat ?? toNumberOrNull(shipment.customer_latitude);
   const lng = shipment.customer?.lng ?? toNumberOrNull(shipment.customer_longitude);
+  const wLat = toNumberOrNull(shipment.warehouse_latitude);
+  const wLng = toNumberOrNull(shipment.warehouse_longitude);
 
   return {
     id: requireBackendValue(shipment.id, 'logistics_shipments.id'),
@@ -406,6 +408,7 @@ function mapShipment(detail: DriverShipmentDetail): Shipment {
     customerPhone: resolveCustomerPhone(shipment),
     address: buildAddress(shipment),
     coordinates: lat != null && lng != null ? { lat, lng } : null,
+    warehouseCoordinates: wLat != null && wLng != null ? { lat: wLat, lng: wLng } : null,
     items,
     totalItems: skuCount,
     skuCount,

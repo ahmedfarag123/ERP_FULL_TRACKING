@@ -11,6 +11,7 @@ import {
   PlayCircle,
   Navigation,
   XCircle,
+  Map,
 } from 'lucide-react';
 import { useDeliveryStore } from '@/stores/deliveryStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -331,6 +332,7 @@ export default function RouteScreen() {
     getRouteGate,
   } = useDeliveryStore();
   const setActiveTab = useUIStore((s) => s.setActiveTab);
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadShipments();
@@ -424,6 +426,16 @@ export default function RouteScreen() {
             <p className="text-xs text-app-text-secondary mt-2">
               {total} نقاط توقف · {progressPct}% تم تسليمها{failed > 0 ? ` · ${failed} فشلت` : ''}
             </p>
+            {planShipments.some((s) => s.coordinates) && (
+              <button
+                type="button"
+                onClick={() => navigate('/live-map')}
+                className="mt-3 w-full h-10 rounded-xl bg-app-dark text-white text-xs font-semibold flex items-center justify-center gap-1.5 active:scale-[0.97] transition-transform"
+              >
+                <Map size={14} />
+                عرض الخرطة المباشرة
+              </button>
+            )}
           </motion.div>
 
           {/* Route List */}

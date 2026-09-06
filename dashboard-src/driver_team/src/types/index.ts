@@ -112,7 +112,8 @@ export interface Shipment {
   customerName: string | null;
   customerPhone: string | null;
   address: string | null;
-  coordinates: { lat: number; lng: number } | null;
+coordinates: { lat: number; lng: number } | null;
+  warehouseCoordinates?: { lat: number; lng: number } | null;
   items: ShipmentItem[];
   totalItems: number;
   skuCount?: number;

@@ -20,7 +20,8 @@ export default function BottomNavigation() {
   // Hide on detail pages
   if (location.pathname.includes('/deliveries/') || 
       location.pathname.includes('/settings/') ||
-      location.pathname.includes('/notifications')) {
+      location.pathname.includes('/notifications') ||
+      location.pathname === '/live-map') {
     return null;
   }
 

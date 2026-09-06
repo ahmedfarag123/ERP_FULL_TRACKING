@@ -22,7 +22,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { useAuthStore } from '@/stores/authStore';
 import ShipmentListItem from '@/components/ShipmentListItem';
 import BottomSheet from '@/components/BottomSheet';
-import DriverLiveRouteMap from '@/components/DriverLiveRouteMap';
+import DriverDashboardMap from '@/components/DriverDashboardMap';
 import EndOfRouteModal from '@/components/EndOfRouteModal';
 import { createDriverSosAlert } from '@/services/driverAlerts';
 import { submitCollectionRequest, submitCollectionHandover } from '@/services/collectionHandover';
@@ -475,22 +475,23 @@ export default function DashboardScreen() {
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
       {/* Hero Header */}
-      <div className="relative bg-gradient-to-br from-emerald-600 via-emerald-500 to-teal-500 px-5 pt-6 pb-20 rounded-b-[28px] overflow-hidden">
-        {/* Decorative circles */}
-        <div className="absolute -top-12 -right-12 w-40 h-40 bg-white/10 rounded-full" />
-        <div className="absolute -bottom-8 -left-8 w-32 h-32 bg-white/5 rounded-full" />
-        <div className="absolute top-8 left-1/2 w-20 h-20 bg-white/5 rounded-full" />
+      <div className="relative bg-white px-5 pt-5 pb-16 overflow-hidden">
+        {/* subtle brand accent line at top */}
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600" />
+        {/* soft decorative gradient */}
+        <div className="pointer-events-none absolute -top-20 -right-20 w-56 h-56 rounded-full bg-gradient-to-br from-emerald-100/70 to-teal-50/40 blur-2xl" />
+        <div className="pointer-events-none absolute -bottom-24 -left-16 w-48 h-48 rounded-full bg-gradient-to-tr from-amber-100/50 to-transparent blur-2xl" />
 
         <div className="relative z-10">
           {/* Top row: logo + online toggle */}
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2.5">
               <img
                 src={driverAsset('logo.png')}
                 alt=""
-                className="h-9 w-9 rounded-xl object-contain bg-white/20 p-1"
+                className="h-9 w-9 rounded-xl object-contain bg-emerald-50 p-1 ring-1 ring-emerald-100"
               />
-              <span className="text-white/90 text-sm font-semibold">هوريكا سمارت</span>
+              <span className="text-gray-900 text-sm font-bold">هوريكا سمارت</span>
             </div>
             <button
               type="button"
@@ -498,33 +499,46 @@ export default function DashboardScreen() {
                 setDriverOnline(!isDriverOnline);
                 handleSync();
               }}
-              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
+              className={`flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-semibold transition-all ring-1 ${
                 isDriverOnline
-                  ? 'bg-white/20 text-white'
-                  : 'bg-white/10 text-white/70'
+                  ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                  : 'bg-gray-50 text-gray-500 ring-gray-200'
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${isDriverOnline ? 'bg-white animate-pulse' : 'bg-white/40'}`} />
+              <span className={`relative flex h-2 w-2`}>
+                {isDriverOnline && (
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                )}
+                <span
+                  className={`relative inline-flex h-2 w-2 rounded-full ${
+                    isDriverOnline ? 'bg-emerald-500' : 'bg-gray-300'
+                  }`}
+                />
+              </span>
               {isDriverOnline ? 'متصل' : 'غير متصل'}
             </button>
           </div>
 
           {/* Greeting */}
-          <div>
-            <h1 className="text-[26px] font-bold text-white leading-tight">
-              {getGreeting()}
-              {user?.firstName && (
-                <span className="text-white/90"> {user.firstName}</span>
-              )}
-            </h1>
-            <p className="text-sm text-white/70 mt-1.5">
-              {new Date().toLocaleDateString('ar-EG', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-              })}
-            </p>
+          <div className="flex items-end justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-400">
+                {new Date().toLocaleDateString('ar-EG', {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                })}
+              </p>
+              <h1 className="text-2xl font-extrabold text-gray-900 leading-tight mt-1">
+                {getGreeting()}
+                {user?.firstName && <span className="text-emerald-600"> {user.firstName}</span>}
+              </h1>
+              <p className="text-xs text-gray-400 mt-1">كيف حالك اليوم؟ عندك مهمات بانتظارك</p>
+            </div>
+            {/* Avatar circle */}
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-lg font-extrabold text-white shadow-lg shadow-emerald-200">
+              {(user?.firstName ?? 'س').charAt(0)}
+            </div>
           </div>
         </div>
       </div>
@@ -536,56 +550,67 @@ export default function DashboardScreen() {
         className="flex-1 overflow-y-auto no-scrollbar pb-24 -mt-12 relative z-10"
       >
         {/* Stats Cards */}
-        <motion.div variants={itemVariants} className="px-4 grid grid-cols-4 gap-2.5">
-          {[
-            { label: 'الإجمالي', value: displayStats.total, bg: 'bg-white', iconColor: 'text-gray-500', iconBg: 'bg-gray-100' },
-            { label: 'معلق', value: displayStats.pending, bg: 'bg-white', iconColor: 'text-emerald-600', iconBg: 'bg-emerald-50' },
-            { label: 'تم', value: displayStats.delivered, bg: 'bg-white', iconColor: 'text-blue-600', iconBg: 'bg-blue-50' },
-            ...(displayStats.failed > 0
-              ? [{ label: 'فشل', value: displayStats.failed, bg: 'bg-white', iconColor: 'text-red-500', iconBg: 'bg-red-50' }]
-              : []),
-          ].map((stat, i) => (
-            <motion.div
-              key={stat.label}
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: i * 0.06, duration: 0.3 }}
-              className={`${stat.bg} rounded-2xl p-3 shadow-sm flex flex-col items-center text-center border border-gray-100`}
-            >
-              <div className={`w-8 h-8 rounded-xl ${stat.iconBg} flex items-center justify-center mb-1.5`}>
-                <span className={`text-lg font-bold ${stat.iconColor}`}>{stat.value}</span>
-              </div>
-              <span className="text-[11px] text-gray-500 font-medium">{stat.label}</span>
-            </motion.div>
-          ))}
-        </motion.div>
-
-        {/* Progress Bar */}
-        <motion.div variants={itemVariants} className="mx-4 mt-4 bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-semibold text-gray-800">تقدم اليوم</h3>
-            <span className="text-xs text-gray-400 font-medium">
-              {displayStats.delivered + displayStats.failed} / {displayStats.total}
-            </span>
-          </div>
-          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{
-                width: `${displayStats.total > 0 ? ((displayStats.delivered + displayStats.failed) / displayStats.total) * 100 : 0}%`,
-              }}
-              transition={{ duration: 0.8, ease: 'easeOut', delay: 0.3 }}
-              className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500"
-            />
-          </div>
-          <div className="flex items-center justify-between mt-2">
-            <p className="text-xs text-emerald-600 font-semibold">
-              {displayStats.total > 0 ? Math.round(((displayStats.delivered + displayStats.failed) / displayStats.total) * 100) : 0}% نسبة النجاح
-            </p>
-            <div className="flex items-center gap-3 text-[11px] text-gray-400">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400" /> تم</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-300" /> متبقي</span>
+        <motion.div variants={itemVariants} className="px-4">
+          <div className="bg-white rounded-3xl px-5 py-4 shadow-sm border border-gray-100">
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                {
+                  label: 'الإجمالي',
+                  value: displayStats.total,
+                  accent: 'bg-gray-900',
+                  soft: 'bg-gray-100',
+                  text: 'text-gray-900',
+                  trend: 'كل الشحنات',
+                },
+                {
+                  label: 'معلق',
+                  value: displayStats.pending,
+                  accent: 'bg-amber-400',
+                  soft: 'bg-amber-50',
+                  text: 'text-amber-500',
+                  trend: 'قيد التنفيذ',
+                },
+                {
+                  label: 'تم',
+                  value: displayStats.delivered,
+                  accent: 'bg-emerald-500',
+                  soft: 'bg-emerald-50',
+                  text: 'text-emerald-600',
+                  trend: 'تم التسليم',
+                },
+              ].map((stat) => (
+                <div key={stat.label} className="flex flex-col items-center gap-1 py-1">
+                  <div className={`flex items-center gap-1.5 ${stat.soft} rounded-full px-2.5 py-0.5`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${stat.accent}`} />
+                    <span className={`text-[10px] font-semibold ${stat.text}`}>{stat.trend}</span>
+                  </div>
+                  <span className="text-[30px] font-extrabold leading-none text-gray-900 mt-1 tabular-nums">
+                    {stat.value}
+                  </span>
+                  <span className="text-[11px] font-medium text-gray-400">{stat.label}</span>
+                </div>
+              ))}
             </div>
+            {displayStats.total > 0 && (
+              <div className="mt-4 pt-3 border-t border-gray-50">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] font-semibold text-gray-500">تقدم اليوم</span>
+                  <span className="text-[11px] font-bold text-emerald-600 tabular-nums">
+                    {Math.round(((displayStats.delivered + displayStats.failed) / displayStats.total) * 100)}%
+                  </span>
+                </div>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{
+                      width: `${displayStats.total > 0 ? ((displayStats.delivered + displayStats.failed) / displayStats.total) * 100 : 0}%`,
+                    }}
+                    transition={{ duration: 0.8, ease: 'easeOut', delay: 0.3 }}
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </motion.div>
 
@@ -761,25 +786,31 @@ export default function DashboardScreen() {
           </motion.div>
         )}
 
-        {/* Live Map */}
-        {activePhase === 'out_for_delivery' && (
-          <motion.div variants={itemVariants} className="mx-4 mt-4 bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-gray-800">الخريطة المباشرة</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab('route');
-                  navigate('/route');
-                }}
-                className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg"
-              >
-                خط السير
-              </button>
+        {/* Live Map - always visible with driver location + warehouse, route when plan set */}
+        <motion.div variants={itemVariants} className="mx-4 mt-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
+              </span>
+              <h3 className="text-sm font-semibold text-gray-800">موقعك المباشر</h3>
+              {activePlanId && (
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-600">
+                  خطة نشطة
+                </span>
+              )}
             </div>
-            <DriverLiveRouteMap shipments={shipments} activeShipmentId={activeShipment?.id ?? null} />
-          </motion.div>
-        )}
+            <button
+              type="button"
+              onClick={() => navigate('/live-map')}
+              className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg active:scale-95 transition-transform"
+            >
+              الشاشة الكاملة
+            </button>
+          </div>
+          <DriverDashboardMap heightClass="h-60" />
+        </motion.div>
 
         {/* Quick Actions */}
         <motion.div variants={itemVariants} className="px-4 mt-4">

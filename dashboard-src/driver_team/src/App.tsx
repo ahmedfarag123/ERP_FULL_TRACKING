@@ -25,6 +25,7 @@ import CollectionScreen from '@/screens/CollectionScreen';
 import ConnectionDiagnosticsScreen from '@/screens/ConnectionDiagnosticsScreen';
 import NotificationsScreen from '@/screens/NotificationsScreen';
 import EditProfileScreen from '@/screens/EditProfileScreen';
+import DriverLiveMapScreen from '@/screens/DriverLiveMapScreen';
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -280,6 +281,17 @@ export default function App() {
               <AppLayout>
                 <RouteScreen />
               </AppLayout>
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/live-map"
+          element={
+            <AuthGuard>
+              <MobileContainer>
+                <DriverLiveMapScreen />
+                <Toast />
+              </MobileContainer>
             </AuthGuard>
           }
         />

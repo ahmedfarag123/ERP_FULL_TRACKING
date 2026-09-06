@@ -108,3 +108,85 @@
     scrollbar-width: none;
   }
 }
+
+/* ─── Map pins (Uber-style) ─────────────────────────── */
+.driver-pin {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.driver-pin-core {
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: #10b981;
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.5);
+  z-index: 2;
+}
+.driver-pin-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: rgba(16, 185, 129, 0.25);
+  animation: driverPulse 2s ease-out infinite;
+  z-index: 1;
+}
+@keyframes driverPulse {
+  0% { transform: scale(0.5); opacity: 0.8; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+.warehouse-pin {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: #b45309;
+  border: 3px solid #ffffff;
+  box-shadow: 0 3px 10px rgba(180, 83, 9, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+.warehouse-pin::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid #b45309;
+}
+
+.stop-pin {
+  width: 30px;
+  height: 30px;
+  border-radius: 9999px;
+  border: 3px solid #ffffff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  box-sizing: border-box;
+}
+
+/* Leaflet control overrides inside mobile frame */
+.leaflet-container {
+  font-family: inherit;
+  background: #e2e8f0;
+}
+.leaflet-tooltip {
+  font-family: inherit;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}

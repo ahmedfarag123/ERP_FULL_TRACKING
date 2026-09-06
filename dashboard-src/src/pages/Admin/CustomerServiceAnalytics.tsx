@@ -7,10 +7,18 @@ import {
   Cell,
   ResponsiveContainer,
   Tooltip,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
 } from "recharts";
 import PageMeta from "../../components/common/PageMeta";
 import DateRangePicker from "../../components/form/date-range-picker";
-import { fetchCustomerServiceAnalytics } from "../../lib/customer-service";
+import {
+  fetchCustomerServiceAnalytics,
+  fetchCustomerServiceProductAnalytics,
+} from "../../lib/customer-service";
+import type { CustomerServiceProductStat } from "../../lib/customer-service";
 import { supabase } from "../../lib/supabase";
 import type { DateRangeValue } from "../../lib/date-range";
 
@@ -167,10 +175,12 @@ interface TicketRow {
 
 function InlineDetailPanel({
   title,
+  summary,
   tickets,
   onClose,
 }: {
   title: string;
+  summary?: string;
   tickets: TicketRow[];
   onClose: () => void;
 }) {
@@ -191,6 +201,20 @@ function InlineDetailPanel({
           إغلاق
         </button>
       </div>
+      {summary && (
+        <div className="flex flex-wrap items-center gap-3 border-b border-gray-100 px-6 py-3 dark:border-gray-800">
+          <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+            محلول
+          </span>
+          <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+            معلق
+          </span>
+          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+            النسبة
+          </span>
+          <span className="text-xs font-semibold text-gray-700 dark:text-gray-300" dir="ltr">{summary}</span>
+        </div>
+      )}
       <div className="max-h-[400px] overflow-auto p-4">
         {tickets.length === 0 ? (
           <p className="py-8 text-center text-sm text-gray-500">لا توجد تذاكر</p>
@@ -337,23 +361,28 @@ function PieChartCard({
 
 /* ─── KPI Card ────────────────────────────────────────────────────────── */
 
-function KpiCard({ title, value, subtitle, delay }: {
+function KpiCard({ title, value, subtitle, delay, onClick }: {
   title: string;
   value: string | number;
   subtitle: string;
   delay: number;
+  onClick?: () => void;
 }) {
   return (
-    <motion.div
+    <motion.button
+      type="button"
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay, duration: 0.4 }}
-      className="flex-1 min-w-[200px] rounded-2xl bg-[#0f172a] p-6 text-white shadow-lg"
+      onClick={onClick}
+      className={`flex-1 min-w-[200px] rounded-2xl bg-[#0f172a] p-6 text-left text-white shadow-lg ${
+        onClick ? "cursor-pointer transition hover:-translate-y-0.5 hover:bg-[#16213d] hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-400/60" : ""
+      }`}
     >
       <p className="text-xs font-medium uppercase tracking-wider text-blue-200">{title}</p>
       <p className="mt-3 text-4xl font-extrabold text-red-500">{value}</p>
       <p className="mt-2 text-sm text-blue-100">{subtitle}</p>
-    </motion.div>
+    </motion.button>
   );
 }
 
@@ -390,11 +419,28 @@ export default function CustomerServiceAnalytics() {
     queryFn: async () => {
       const { data } = await supabase
         .from("order_tickets")
-        .select("id, subject, status, category, created_at, assigned_to_full_name, assigned_departments, order:orders(delivery_status), raw_payload")
+        .select("id, subject, status, category, created_at, resolved_at, closed_at, assigned_to_full_name, assigned_departments, order:orders(delivery_status), raw_payload")
         .gte("created_at", startISO)
         .lte("created_at", endISO);
-      return (data ?? []) as unknown as Array<TicketRow & { assigned_departments: string[] | null; order: { delivery_status: string | null } | null; raw_payload: Record<string, unknown> | null }>;
+      return (data ?? []) as unknown as Array<TicketRow & {
+        resolved_at: string | null;
+        closed_at: string | null;
+        assigned_departments: string[] | null;
+        order: { delivery_status: string | null } | null;
+        raw_payload: Record<string, unknown> | null;
+      }>;
     },
+    staleTime: 60_000,
+  });
+
+  const isDetailResolved = (t: { status: string; resolved_at?: string | null; closed_at?: string | null }) =>
+    t.status === "resolved" || t.status === "closed" || Boolean(t.resolved_at || t.closed_at);
+  const sortByCreatedDesc = (a: TicketRow, b: TicketRow) =>
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+
+  const { data: productStats } = useQuery({
+    queryKey: ["cs-analytics-products", startISO, endISO],
+    queryFn: () => fetchCustomerServiceProductAnalytics(startISO, endISO),
     staleTime: 60_000,
   });
 
@@ -403,6 +449,27 @@ export default function CustomerServiceAnalytics() {
   const [activeCategory, setActiveCategory] = useState<string | undefined>();
   const [activeDepartment, setActiveDepartment] = useState<string | undefined>();
   const [activeDelivery, setActiveDelivery] = useState<string | undefined>();
+  const [productDetail, setProductDetail] = useState<CustomerServiceProductStat | null>(null);
+
+  const [kpiDetail, setKpiDetail] = useState<{ title: string; summary: string; tickets: TicketRow[] } | null>(null);
+
+  function openKpiDetail(key: "total" | "resolved" | "percent" | "rate") {
+    if (!ticketDetails?.length) return;
+    const all = [...ticketDetails].sort(sortByCreatedDesc);
+    const resolved = all.filter(isDetailResolved);
+    const pending = all.filter((t) => !isDetailResolved(t));
+    const pct = all.length > 0 ? Math.round((resolved.length / all.length) * 100) : 0;
+    const summary = `محلول ${resolved.length}  (${pct}%)   •   معلق ${pending.length}  (${100 - pct}%)   •   إجمالي ${all.length}`;
+    if (key === "total") {
+      setKpiDetail({ title: `إجمالي التذاكر — ${all.length}`, summary, tickets: all });
+    } else if (key === "resolved") {
+      setKpiDetail({ title: `تم الحل — ${resolved.length} من ${all.length} (${pct}%)`, summary, tickets: resolved });
+    } else if (key === "percent") {
+      setKpiDetail({ title: `نسبة التذاكر المكتملة — ${pct}%`, summary, tickets: resolved });
+    } else {
+      setKpiDetail({ title: `معدل الحل — ${pct}%`, summary, tickets: resolved });
+    }
+  }
 
   function getTicketDeliveryKey(t: TicketRow & { order: { delivery_status: string | null } | null; raw_payload: Record<string, unknown> | null }): string {
     const orderStatus = Array.isArray(t.order) ? t.order[0]?.delivery_status : t.order?.delivery_status;
@@ -487,6 +554,11 @@ export default function CustomerServiceAnalytics() {
     key,
   }));
 
+  const productChartData = (productStats ?? []).slice(0, 10).map((p) => ({
+    name: (p.product_name || "").replace(/^\[[^\]]*\]\s*/, "").slice(0, 30),
+    tickets: p.ticket_count,
+  }));
+
   const rangeLabel = quickRange === "7d" ? "Last Week" : quickRange === "30d" ? "Last 30 Days" : "Selected Period";
 
   return (
@@ -543,10 +615,10 @@ export default function CustomerServiceAnalytics() {
             {/* KPI Cards */}
             <div className="px-8 pb-6">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <KpiCard title="Count Of Tickets" value={isLoading ? "—" : total} subtitle={`${rangeLabel} ${prevTotal > 0 ? (totalTrend >= 0 ? "+" : "") + totalTrend.toFixed(0) + "% vs prev" : ""}`} delay={0} />
-                <KpiCard title="Resolved Tickets" value={isLoading ? "—" : resolved} subtitle={`${rangeLabel} ${prevResolved > 0 ? (resolvedTrend >= 0 ? "+" : "") + resolvedTrend.toFixed(0) + "% vs prev" : ""}`} delay={0.05} />
-                <KpiCard title="Percent of Tickets" value={isLoading ? "—" : `${percentage}%`} subtitle={`${rangeLabel} ${total > 0 ? resolved + "/" + total + " resolved" : ""}`} delay={0.1} />
-                <KpiCard title="Resolving Rate" value={isLoading ? "—" : `${resolveRate}%`} subtitle={rangeLabel} delay={0.15} />
+                <KpiCard title="Count Of Tickets" value={isLoading ? "—" : total} subtitle={`${rangeLabel} ${prevTotal > 0 ? (totalTrend >= 0 ? "+" : "") + totalTrend.toFixed(0) + "% vs prev" : ""}`} delay={0} onClick={() => openKpiDetail("total")} />
+                <KpiCard title="Resolved Tickets" value={isLoading ? "—" : resolved} subtitle={`${rangeLabel} ${prevResolved > 0 ? (resolvedTrend >= 0 ? "+" : "") + resolvedTrend.toFixed(0) + "% vs prev" : ""}`} delay={0.05} onClick={() => openKpiDetail("resolved")} />
+                <KpiCard title="Percent of Tickets" value={isLoading ? "—" : `${percentage}%`} subtitle={`${rangeLabel} ${total > 0 ? resolved + "/" + total + " resolved" : ""}`} delay={0.1} onClick={() => openKpiDetail("percent")} />
+                <KpiCard title="Resolving Rate" value={isLoading ? "—" : `${resolveRate}%`} subtitle={rangeLabel} delay={0.15} onClick={() => openKpiDetail("rate")} />
               </div>
             </div>
 
@@ -599,6 +671,103 @@ export default function CustomerServiceAnalytics() {
                 />
               </div>
             </div>
+
+            {/* Top Problem Products */}
+            <div className="px-8 pb-6">
+              <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200/60 dark:bg-white/[0.04] dark:ring-white/[0.06]">
+                <h3 className="mb-4 text-sm font-bold text-gray-900 dark:text-white" dir="rtl">
+                  المنتجات الأكثر شكاوى (مرتبطة بتذاكر)
+                </h3>
+                {(!productStats || productStats.length === 0) ? (
+                  <div className="flex h-[200px] items-center justify-center text-sm text-gray-400">
+                    {productStats && productStats.length === 0 ? "لا توجد منتجات مرتبطة في هذه الفترة" : "جارٍ التحميل..."}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+                    <div className="min-w-0">
+                      <ResponsiveContainer width="100%" height={Math.max(240, productChartData.length * 26)}>
+                        <BarChart
+                          data={productChartData}
+                          layout="vertical"
+                          margin={{ top: 0, right: 10, left: 10, bottom: 0 }}
+                        >
+                          <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#64748b" }} />
+                          <YAxis
+                            type="category"
+                            dataKey="name"
+                            width={170}
+                            tick={{ fontSize: 10, fill: "#64748b" }}
+                          />
+                          <Tooltip
+                            content={({ active, payload }) => {
+                              if (!active || !payload?.length) return null;
+                              const d = payload[0];
+                              return (
+                                <div className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm shadow-lg dark:border-gray-700 dark:bg-gray-900" dir="rtl">
+                                  <p className="font-bold text-gray-900 dark:text-white">{d.payload.name}</p>
+                                  <p className="mt-0.5 text-gray-700 dark:text-gray-300">{d.value} تذكرة</p>
+                                </div>
+                              );
+                            }}
+                          />
+                          <Bar dataKey="tickets" fill="#f59e0b" radius={[0, 6, 6, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="min-w-0 space-y-1.5 lg:col-span-2">
+                      {(productStats ?? []).map((p) => (
+                        <button
+                          key={`${p.product_code ?? p.product_name}`}
+                          type="button"
+                          onClick={() => setProductDetail(p)}
+                          className={`w-full rounded-lg px-3 py-2 text-right text-xs transition ${
+                            productDetail?.product_code === p.product_code && productDetail?.product_name === p.product_name
+                              ? "bg-amber-50 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:ring-amber-800"
+                              : "hover:bg-gray-50 dark:hover:bg-white/[0.06]"
+                          }`}
+                        >
+                          <span className="block font-semibold text-gray-800 dark:text-gray-200">
+                            {(p.product_name || "").replace(/^\[[^\]]*\]\s*/, "")}
+                          </span>
+                          <span className="mt-0.5 block text-[11px] text-gray-500 dark:text-gray-400">
+                            {p.ticket_count} تذكرة
+                            {p.product_code ? ` • كود ${p.product_code}` : ""}
+                            {p.order_count > 0 ? ` • ${p.order_count} أوردر` : ""}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Product Ticket Detail Panel */}
+            <AnimatePresence>
+              {productDetail && productDetail.tickets.length > 0 && (
+                <div className="px-8 pb-6">
+                  <InlineDetailPanel
+                    title={`${productDetail.product_name} — ${productDetail.tickets.length} تذكرة`}
+                    tickets={productDetail.tickets as unknown as TicketRow[]}
+                    onClose={() => setProductDetail(null)}
+                  />
+                </div>
+              )}
+            </AnimatePresence>
+
+            {/* KPI Detail Panel */}
+            <AnimatePresence>
+              {kpiDetail && kpiDetail.tickets.length > 0 && (
+                <div className="px-8 pb-6">
+                  <InlineDetailPanel
+                    title={kpiDetail.title}
+                    summary={kpiDetail.summary}
+                    tickets={kpiDetail.tickets}
+                    onClose={() => setKpiDetail(null)}
+                  />
+                </div>
+              )}
+            </AnimatePresence>
 
             {/* Inline Detail Panel */}
             <AnimatePresence>

@@ -480,18 +480,137 @@ export async function deleteTicket(ticketId: string) {
   if (error) throw error;
 }
 
+export interface CustomerServiceProductStat {
+  product_code: string | null;
+  product_name: string;
+  ticket_count: number;
+  order_count: number;
+  tickets: Array<{ id: string; subject: string; status: string; created_at: string }>;
+}
+
+function chunkValues<T>(values: T[], size = 200) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
+export async function fetchCustomerServiceProductAnalytics(startISO: string, endISO: string): Promise<CustomerServiceProductStat[]> {
+  // 1) Tickets in range with order reference
+  const { data: ticketRows, error: ticketError } = await supabase
+    .from("order_tickets")
+    .select("id, subject, status, created_at, order_id")
+    .gte("created_at", startISO)
+    .lte("created_at", endISO);
+  if (ticketError) throw ticketError;
+  const tickets = (ticketRows ?? []) as Array<{ id: string; subject: string; status: string; created_at: string; order_id: string | null }>;
+
+  const orderIds = Array.from(new Set(tickets.map((t) => t.order_id).filter((x): x is string => Boolean(x))));
+
+  // 2) Order lines (products) for the linked orders
+  const orderIdIndex = (id: string | null) => id;
+
+  // Group line items by order_id
+  const linesByOrder = new Map<string, Array<{ product_code: string | null; product_name: string }>>();
+  for (const chunk of chunkValues(orderIds)) {
+    const { data, error } = await supabase
+      .from("order_line_items")
+      .select("order_id, product_code, product_name, display_type, ordered_quantity")
+      .in("order_id", chunk);
+    if (error) throw error;
+    for (const row of (data ?? []) as Array<{ order_id: string; product_code: string | null; product_name: string; display_type?: string | null; ordered_quantity?: number | null }>) {
+      const displayType = String(row.display_type ?? "").trim();
+      if (displayType && displayType !== "product") continue;
+      if (Number(row.ordered_quantity ?? 0) <= 0) continue;
+      const name = String(row.product_name ?? "").trim();
+      if (!name) continue;
+      const existing = linesByOrder.get(row.order_id) ?? [];
+      existing.push({ product_code: row.product_code, product_name: name });
+      linesByOrder.set(row.order_id, existing);
+    }
+  }
+
+  // 3) Aggregate by product (key = code if present else normalized name)
+  const productMap = new Map<string, CustomerServiceProductStat>();
+  const keyFor = (line: { product_code: string | null; product_name: string }) => {
+    const code = (line.product_code ?? "").trim();
+    if (code) return `code:${code}`;
+    return `name:${line.product_name}`;
+  };
+
+  for (const ticket of tickets) {
+    if (!ticket.order_id) continue;
+    const orderKey = orderIdIndex(ticket.order_id);
+    const lines = linesByOrder.get(orderKey ?? "");
+    if (!lines) continue;
+    for (const line of lines) {
+      const key = keyFor(line);
+      let stat = productMap.get(key);
+      if (!stat) {
+        stat = {
+          product_code: line.product_code,
+          product_name: line.product_name,
+          ticket_count: 0,
+          order_count: 0,
+          tickets: [],
+        };
+        productMap.set(key, stat);
+      }
+      const isNewTicket = !stat.tickets.some((t) => t.id === ticket.id);
+      if (isNewTicket) {
+        stat.ticket_count += 1;
+        stat.tickets.push({ id: ticket.id, subject: ticket.subject, status: ticket.status, created_at: ticket.created_at });
+      }
+    }
+  }
+
+  // Order count: unique orders per product
+  const orderCountMap = new Map<string, Set<string>>();
+  for (const ticket of tickets) {
+    if (!ticket.order_id) continue;
+    const lines = linesByOrder.get(orderIdIndex(ticket.order_id) ?? "");
+    if (!lines) continue;
+    for (const line of lines) {
+      const key = keyFor(line);
+      let set = orderCountMap.get(key);
+      if (!set) { set = new Set(); orderCountMap.set(key, set); }
+      set.add(ticket.order_id);
+    }
+  }
+  for (const [key, stat] of productMap) {
+    stat.order_count = orderCountMap.get(key)?.size ?? 0;
+  }
+
+  return Array.from(productMap.values())
+    .sort((a, b) => b.ticket_count - a.ticket_count)
+    .slice(0, 20);
+}
+
 export async function fetchCustomerServiceAnalytics(startISO: string, endISO: string) {
-  const [totalRes, resolvedRes, categoryRes, deptRes, deliveryRes, dailyRes, agentRes] = await Promise.all([
-    supabase.from("order_tickets").select("id", { count: "exact", head: true }).gte("created_at", startISO).lte("created_at", endISO),
-    supabase.from("order_tickets").select("id", { count: "exact", head: true }).gte("created_at", startISO).lte("created_at", endISO).in("status", ["resolved", "closed"]),
+  const [categoryRes, deptRes, deliveryRes, dailyRes, agentRes, ticketRows] = await Promise.all([
     supabase.from("order_tickets").select("category").gte("created_at", startISO).lte("created_at", endISO),
     supabase.from("order_tickets").select("assigned_departments").gte("created_at", startISO).lte("created_at", endISO),
     supabase.from("order_tickets").select("order:orders(delivery_status), raw_payload").gte("created_at", startISO).lte("created_at", endISO),
     supabase.from("order_tickets").select("created_at").gte("created_at", startISO).lte("created_at", endISO),
     supabase.from("order_tickets").select("created_by, status, resolved_at, created_at").gte("created_at", startISO).lte("created_at", endISO),
+    supabase.from("order_tickets")
+      .select("id, status, created_at, resolved_at, closed_at")
+      .gte("created_at", startISO)
+      .lte("created_at", endISO),
   ]);
-  const total = totalRes.count ?? 0;
-  const resolved = resolvedRes.count ?? 0;
+  const isResolved = (row: { status: string; resolved_at: string | null; closed_at: string | null }) =>
+    row.status === "resolved" || row.status === "closed" || Boolean(row.resolved_at || row.closed_at);
+  const rangeStart = new Date(startISO).getTime();
+  const rangeEnd = new Date(endISO).getTime();
+  const tickets = ((ticketRows?.data ?? []) as Array<{ id: string; status: string; created_at: string; resolved_at: string | null; closed_at: string | null }>)
+    .filter((row) => {
+      if (row.status === "resolved" || row.status === "closed") return true;
+      const t = new Date(row.created_at).getTime();
+      return Number.isFinite(t) && t >= rangeStart && t <= rangeEnd;
+    });
+  const total = tickets.length;
+  const resolved = tickets.filter(isResolved).length;
   const categoryRows = (categoryRes.data ?? []) as Array<{ category: string | null }>;
   const byCategory: Record<string, number> = {};
   for (const row of categoryRows) { const key = row.category || "other"; byCategory[key] = (byCategory[key] || 0) + 1; }

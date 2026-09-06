@@ -261,7 +261,7 @@ interface CustomerSearchListProps {
   onSelect: (customer: { id: string; customer_name: string; phone_number: string | null }) => void;
 }
 
-type CustomerRow = { id: string; customer_name: string; phone_number: string | null };
+type CustomerRow = { id: string | null; customer_name: string; phone_number: string | null };
 
 const ALL_CUSTOMERS_CACHE_KEY = "all-customers-list";
 
@@ -273,6 +273,7 @@ export function CustomerSearchList({ selectedId, onSelect }: CustomerSearchListP
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(0);
+  const [creatingId, setCreatingId] = useState<string | null>(null);
   const debouncedQueryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   
@@ -305,22 +306,12 @@ export function CustomerSearchList({ selectedId, onSelect }: CustomerSearchListP
   );
 
   const fetchCustomers = useCallback(async (searchQuery: string, pageNum: number, signal?: AbortSignal) => {
-    const from = pageNum * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
+    const { data, error: fetchError } = await supabase.rpc("search_all_customers", {
+      p_text: searchQuery.trim(),
+      p_page_size: PAGE_SIZE,
+      p_page: pageNum,
+    });
 
-    let queryBuilder = supabase
-      .from("customers")
-      .select("id, customer_name, phone_number")
-      .order("customer_name", { ascending: true })
-      .range(from, to);
-
-    if (searchQuery.trim()) {
-      queryBuilder = queryBuilder.or(
-        `customer_name.ilike.%${searchQuery.trim()}%,phone_number.ilike.%${searchQuery.trim()}%`
-      );
-    }
-
-    const { data, error: fetchError } = await queryBuilder;
     if (signal?.aborted) return;
 
     if (fetchError) throw fetchError;
@@ -474,6 +465,42 @@ export function CustomerSearchList({ selectedId, onSelect }: CustomerSearchListP
     }
   };
 
+  const handleSelectCustomer = async (customer: CustomerRow) => {
+    if (customer.id) {
+      onSelect({ id: customer.id, customer_name: customer.customer_name, phone_number: customer.phone_number });
+      return;
+    }
+    if (creatingId) return;
+    setCreatingId(customer.customer_name);
+    setError(null);
+    try {
+      const phone = customer.phone_number?.trim() ? customer.phone_number.trim() : null;
+      const { data, error: insertError } = await supabase
+        .from("customers")
+        .insert({
+          customer_name: customer.customer_name,
+          phone_number: phone,
+          status: "active",
+          priority: "medium",
+          product_interests: [],
+          source: "order_lookup",
+          raw_payload: { customer_name: customer.customer_name, phone_number: phone },
+        })
+        .select("id, customer_name, phone_number")
+        .single();
+
+      if (insertError) throw insertError;
+
+      const created = data as { id: string; customer_name: string; phone_number: string | null };
+      setCustomers((prev) => prev.map((r) => (r.customer_name === customer.customer_name ? created : r)));
+      onSelect(created);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "فشل إنشاء العميل.");
+    } finally {
+      setCreatingId(null);
+    }
+  };
+
   return (
     <div className="grid gap-3">
       <div className="relative">
@@ -494,14 +521,20 @@ export function CustomerSearchList({ selectedId, onSelect }: CustomerSearchListP
       <div className="max-h-60 space-y-2 overflow-y-auto">
         {customers.map((customer) => (
           <ActivitySelectCard
-            key={customer.id}
+            key={customer.id ?? `order-${customer.customer_name}`}
             active={selectedId === customer.id}
-            onClick={() => onSelect(customer)}
+            onClick={() => handleSelectCustomer(customer)}
             title={customer.customer_name}
             subtitle={customer.phone_number ?? undefined}
             icon={<PhoneIcon className="h-5 w-5" aria-hidden />}
           />
         ))}
+
+        {creatingId && (
+          <div className="rounded-2xl border border-dashed border-gray-200 px-4 py-4 text-center text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
+            جار إضافة "{creatingId}" كعميل جديد...
+          </div>
+        )}
 
         {isLoading && (
           <div className="rounded-2xl border border-dashed border-gray-200 px-4 py-4 text-center text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">

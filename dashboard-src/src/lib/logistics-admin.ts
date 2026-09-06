@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 import type { DateRangeValue } from "./date-range";
 import { getDateRangeBounds } from "./date-range";
 
-export type LogisticsPlanStatus = "pending" | "in_progress" | "completed" | "cancelled" | "returned";
+export type LogisticsPlanStatus = "pending" | "in_progress" | "completed" | "cancelled" | "returned" | "not_executed";
 export type ShipmentStatus =
   | "PENDING_ASSIGN"
   | "ASSIGNED"
@@ -60,6 +60,7 @@ export interface LogisticsPlan {
   notes: string | null;
   preparationStatus: string | null;
   preparationCompletedAt: string | null;
+  notExecutedReason: string | null;
 }
 
 export interface LogisticsShipment {
@@ -106,6 +107,8 @@ export interface ShipmentCandidate {
   existingShipmentId: string | null;
   existingPlanId: string | null;
   shipmentStatus: string | null;
+  governorate: string | null;
+  district: string | null;
 }
 
 export interface LogisticsActivity {
@@ -187,6 +190,7 @@ const PLAN_SELECT = `
   route_total_distance_km,
   route_metadata,
   notes,
+  not_executed_reason,
   created_by_profile_id,
   created_at,
   updated_at,
@@ -290,6 +294,7 @@ function mapPlan(row: Record<string, any>, shipmentCounts = new Map<string, numb
     notes: row.notes ?? null,
     preparationStatus: preparation?.status ?? null,
     preparationCompletedAt: preparation?.completed_at ?? null,
+    notExecutedReason: row.not_executed_reason ?? null,
   };
 }
 
@@ -328,28 +333,36 @@ function planShipmentCounts(shipments: LogisticsShipment[]) {
 }
 
 async function fetchPlanShipmentCounts(): Promise<Map<string, number>> {
-  const { data, error } = await supabase
-    .from("logistics_shipments")
-    .select("plan_id")
-    .not("plan_id", "is", null);
+  const { data, error } = await supabase.rpc("count_plan_shipments");
   if (error) throw error;
   const counts = new Map<string, number>();
   for (const row of data ?? []) {
-    const pid = String((row as Record<string, unknown>).plan_id);
-    counts.set(pid, (counts.get(pid) ?? 0) + 1);
+    const value = row as { plan_id: string; shipment_count: number };
+    counts.set(String(value.plan_id), Number(value.shipment_count));
   }
   return counts;
 }
 
 export async function fetchLogisticsShipments(): Promise<LogisticsShipment[]> {
-  const { data, error } = await supabase
-    .from("logistics_shipments")
-    .select(SHIPMENT_SELECT)
-    .order("scheduled_at", { ascending: true, nullsFirst: false })
-    .limit(1500);
+  const MAX = 1500;
+  const PAGE = 1000;
+  const rows: Array<Record<string, any>> = [];
+  let from = 0;
+  while (rows.length < MAX) {
+    const to = from + PAGE - 1;
+    const { data, error } = await supabase
+      .from("logistics_shipments")
+      .select(SHIPMENT_SELECT)
+      .order("scheduled_at", { ascending: true, nullsFirst: false })
+      .range(from, to);
+    if (error) throw error;
+    const chunk = (data ?? []) as Array<Record<string, any>>;
+    rows.push(...chunk);
+    if (chunk.length < PAGE) break;
+    from += PAGE;
+  }
 
-  if (error) throw error;
-  return (data ?? []).map((row) => mapShipment(row as Record<string, any>));
+  return rows.slice(0, MAX).map((row) => mapShipment(row));
 }
 
 export async function fetchLogisticsPlans(): Promise<LogisticsPlan[]> {
@@ -740,7 +753,7 @@ export async function fetchShipmentCandidates(range: DateRangeValue): Promise<Sh
   const { startIso, endIso } = getDateRangeBounds(range);
   let query = supabase
     .from("orders")
-    .select("id, odoo_order_name, external_order_id, customer_name, warehouse_id, commitment_date, delivery_status, amount_total, total_amount, currency_code, type_name")
+    .select("id, odoo_order_name, external_order_id, customer_name, warehouse_id, commitment_date, delivery_status, amount_total, total_amount, currency_code, type_name, customers!customer_id(district, governorate)")
     .not("commitment_date", "is", null)
     .order("commitment_date", { ascending: true })
     .limit(1000);
@@ -750,7 +763,10 @@ export async function fetchShipmentCandidates(range: DateRangeValue): Promise<Sh
 
   const [{ data: orders, error }, { data: shipments, error: shipmentError }] = await Promise.all([
     query,
-    supabase.from("logistics_shipments").select("id, linked_order_id, plan_id, shipment_status"),
+    supabase
+      .from("logistics_shipments")
+      .select("id, linked_order_id, plan_id, shipment_status, logistics_delivery_plans!inner(plan_status)")
+      .not("plan_id", "is", null),
   ]);
 
   if (error) throw error;
@@ -759,8 +775,17 @@ export async function fetchShipmentCandidates(range: DateRangeValue): Promise<Sh
   const shipmentByOrder = new Map((shipments ?? []).map((row: any) => [row.linked_order_id, row]));
   return (orders ?? [])
     .filter((order: any) => isSalesOrderTypeName(order.type_name))
+    .filter((order: any) => {
+      const shipment = shipmentByOrder.get(order.id);
+      if (!shipment) return true;
+      const planStatus = (shipment as any).logistics_delivery_plans?.plan_status;
+      return planStatus === "cancelled" || planStatus === "returned";
+    })
     .map((order: any) => {
       const shipment = shipmentByOrder.get(order.id);
+      const cust = (order as any).customers;
+      const rawGov = String(cust?.governorate ?? "").trim();
+      const parsedGov = rawGov.includes(" | ") ? rawGov.split(" | ").pop()?.replace(/\s*\([^)]*\)\s*$/, "").trim() ?? null : (rawGov && rawGov !== "false" ? rawGov : null);
       return {
         orderId: order.id,
         orderName: order.odoo_order_name ?? order.external_order_id ?? order.id.slice(0, 8),
@@ -773,6 +798,8 @@ export async function fetchShipmentCandidates(range: DateRangeValue): Promise<Sh
         existingShipmentId: shipment?.id ?? null,
         existingPlanId: shipment?.plan_id ?? null,
         shipmentStatus: shipment?.shipment_status ?? null,
+        governorate: parsedGov,
+        district: cust?.district || null,
       };
     });
 }

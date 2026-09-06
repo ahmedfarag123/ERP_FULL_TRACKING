@@ -76,6 +76,20 @@ function tomorrowRange(): DateRangeValue {
   return [tomorrow, tomorrow];
 }
 
+function todayRange(): DateRangeValue {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return [today, today];
+}
+
+function nextNDaysRange(days: number): DateRangeValue {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const end = new Date(today);
+  end.setDate(end.getDate() + (days - 1));
+  return [today, end];
+}
+
 function formatDate(value: string | null | undefined) {
   if (!value) return "--";
   const date = new Date(value);
@@ -148,8 +162,16 @@ function planStatusInfo(status: string, preparationStatus?: string | null): { la
   if (status === "pending") return { label: "مسودة", tone: "yellow" };
   if (status === "in_progress") return { label: "قيد التنفيذ", tone: "blue" };
   if (status === "completed") return { label: "مكتملة", tone: "green" };
+  if (status === "not_executed") return { label: "لم يتم التنفيذ", tone: "red" };
   if (status === "cancelled") return { label: "ملغاة", tone: "gray" };
   return { label: "غير محددة", tone: "gray" };
+}
+
+function notExecutedReasonLabel(reason: string | null | undefined): string | null {
+  if (reason === "warehouse_officer") return "لم يُنفَّذ من أمين المخزن";
+  if (reason === "driver") return "لم يُنفَّذ من السائق";
+  if (reason === "sales_rep") return "لم يُنفَّذ من المندوب";
+  return null;
 }
 
 function shipmentStatusInfo(status: string): { label: string; tone: StatusBadgeTone } {
@@ -462,7 +484,7 @@ function PlanCreatePanel({
   );
 }
 
-type CandidateColumn = "select" | "order" | "customer" | "date" | "warehouse" | "amount" | "status" | "plan" | "view";
+type CandidateColumn = "select" | "order" | "customer" | "date" | "governorate" | "district" | "warehouse" | "amount" | "status" | "plan" | "view";
 
 function ShipmentCandidateTable({
   rows,
@@ -488,6 +510,8 @@ function ShipmentCandidateTable({
     order: true,
     customer: true,
     date: true,
+    governorate: true,
+    district: true,
     warehouse: true,
     amount: true,
     status: true,
@@ -498,7 +522,7 @@ function ShipmentCandidateTable({
   const warehouses = useMemo(() => Array.from(new Set(rows.map((row) => row.warehouseId).filter(Boolean))) as string[], [rows]);
   const filtered = useMemo(() => {
     const next = rows
-      .filter((row) => includesSearch([row.orderName, row.customerName, row.warehouseId, row.deliveryStatus], search))
+      .filter((row) => includesSearch([row.orderName, row.customerName, row.warehouseId, row.deliveryStatus, row.governorate, row.district], search))
       .filter((row) => {
         if (planFilter === "all") return true;
         if (planFilter === "planned") return Boolean(row.existingPlanId);
@@ -512,6 +536,8 @@ function ShipmentCandidateTable({
       const direction = sort.direction === "asc" ? 1 : -1;
       const getValue = (row: ShipmentCandidate) => {
         if (sort.key === "date") return row.commitmentDate ?? "";
+        if (sort.key === "governorate") return row.governorate ?? "";
+        if (sort.key === "district") return row.district ?? "";
         if (sort.key === "amount") return row.amount;
         if (sort.key === "customer") return row.customerName ?? "";
         if (sort.key === "status") return String(row.shipmentStatus ?? "PENDING_ASSIGN");
@@ -525,7 +551,7 @@ function ShipmentCandidateTable({
     });
   }, [rows, search, sort, statusFilter, planFilter, warehouseFilter]);
 
-  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageRows = filtered;
   const selectablePageRows = pageRows.filter((row) => !row.existingPlanId);
   const allVisibleSelected = selectablePageRows.length > 0 && selectablePageRows.every((row) => selected.includes(row.orderId));
   const handleSortToggle = (k: string) => setSort((prev) => prev?.key === k ? (prev.direction === "asc" ? { key: k as CandidateColumn, direction: "desc" } : null) : { key: k as CandidateColumn, direction: "asc" });
@@ -585,7 +611,9 @@ function ShipmentCandidateTable({
                   {visible.order ? <SortableTh label="الطلب" sortKey="order" sort={sort} toggle={handleSortToggle} /> : null}
                   {visible.customer ? <SortableTh label="العميل" sortKey="customer" sort={sort} toggle={handleSortToggle} /> : null}
                   {visible.date ? <SortableTh label="تاريخ التسليم" sortKey="date" sort={sort} toggle={handleSortToggle} /> : null}
-                  {visible.warehouse ? <th className="px-4 py-3">المستودع/المنطقة</th> : null}
+                  {visible.governorate ? <SortableTh label="المحافظة" sortKey="governorate" sort={sort} toggle={handleSortToggle} /> : null}
+                  {visible.district ? <SortableTh label="المنطقة" sortKey="district" sort={sort} toggle={handleSortToggle} /> : null}
+                  {visible.warehouse ? <th className="px-4 py-3">المستودع</th> : null}
                   {visible.amount ? <SortableTh label="القيمة" sortKey="amount" sort={sort} toggle={handleSortToggle} /> : null}
                   {visible.status ? <SortableTh label="الحالة" sortKey="status" sort={sort} toggle={handleSortToggle} /> : null}
                   {visible.plan ? <SortableTh label="الخطة" sortKey="plan" sort={sort} toggle={handleSortToggle} /> : null}
@@ -611,6 +639,8 @@ function ShipmentCandidateTable({
                       {visible.order ? <td className="px-4 py-4 font-semibold text-gray-900 dark:text-white" dir="ltr">{row.orderName}</td> : null}
                       {visible.customer ? <td className="px-4 py-4"><div className="flex items-center gap-3"><CustomerAvatar name={row.customerName ?? "عميل"} size="sm" /><span>{row.customerName ?? "--"}</span></div></td> : null}
                       {visible.date ? <td className="px-4 py-4">{formatDate(row.commitmentDate)}</td> : null}
+                      {visible.governorate ? <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{row.governorate || "--"}</td> : null}
+                      {visible.district ? <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{row.district || "--"}</td> : null}
                       {visible.warehouse ? <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{row.warehouseId ?? "--"}</td> : null}
                       {visible.amount ? <td className="px-4 py-4 font-semibold">{formatMoney(row.amount, row.currency)}</td> : null}
                       {visible.status ? <td className="px-4 py-4"><StatusBadge label={status.label} tone={status.tone} /></td> : null}
@@ -636,7 +666,6 @@ function ShipmentCandidateTable({
               </tbody>
             </table>
           </div>
-          <Pagination page={page} total={filtered.length} onPageChange={setPage} />
         </>
       )}
     </AdminSection>
@@ -809,7 +838,49 @@ export function LogisticsShipmentsPage() {
             <Link to="/logistics/plans/new"><ToolbarButton variant="primary"><PlusIcon className="h-4 w-4" />خطة جديدة</ToolbarButton></Link>
           </>
         } />
-        <AdminSection title="نطاق تاريخ التسليم" description="الافتراضي هو غدًا لأن التخطيط يتم قبل يوم التسليم.">
+        <AdminSection
+          title="تصفية حسب تاريخ التسليم"
+          description="الافتراضي هو غدًا لأن التخطيط يتم قبل يوم التسليم."
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setDateRange(todayRange())}
+                className={`h-9 rounded-full px-4 text-sm font-medium transition ${dateRange[0]?.getTime() === todayRange()[0]?.getTime() && dateRange[1]?.getTime() === todayRange()[1]?.getTime() ? "bg-brand-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-white/[0.04] dark:text-gray-300 dark:hover:bg-white/[0.08]"}`}
+              >
+                اليوم
+              </button>
+              <button
+                type="button"
+                onClick={() => setDateRange(tomorrowRange())}
+                className={`h-9 rounded-full px-4 text-sm font-medium transition ${dateRange[0]?.getTime() === tomorrowRange()[0]?.getTime() && dateRange[1]?.getTime() === tomorrowRange()[1]?.getTime() ? "bg-brand-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-white/[0.04] dark:text-gray-300 dark:hover:bg-white/[0.08]"}`}
+              >
+                غدًا
+              </button>
+              <button
+                type="button"
+                onClick={() => setDateRange(nextNDaysRange(7))}
+                className={`h-9 rounded-full px-4 text-sm font-medium transition ${dateRange[0]?.getTime() === nextNDaysRange(7)[0]?.getTime() && dateRange[1]?.getTime() === nextNDaysRange(7)[1]?.getTime() ? "bg-brand-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-white/[0.04] dark:text-gray-300 dark:hover:bg-white/[0.08]"}`}
+              >
+                الـ 7 أيام القادمة
+              </button>
+              <button
+                type="button"
+                onClick={() => setDateRange(nextNDaysRange(30))}
+                className={`h-9 rounded-full px-4 text-sm font-medium transition ${dateRange[0]?.getTime() === nextNDaysRange(30)[0]?.getTime() && dateRange[1]?.getTime() === nextNDaysRange(30)[1]?.getTime() ? "bg-brand-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-white/[0.04] dark:text-gray-300 dark:hover:bg-white/[0.08]"}`}
+              >
+                الـ 30 يوم القادمة
+              </button>
+              <button
+                type="button"
+                onClick={() => setDateRange([null, null])}
+                className={`h-9 rounded-full px-4 text-sm font-medium transition ${dateRange[0] === null && dateRange[1] === null ? "bg-brand-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-white/[0.04] dark:text-gray-300 dark:hover:bg-white/[0.08]"}`}
+              >
+                الكل
+              </button>
+            </div>
+          }
+        >
           <div className="max-w-md"><DateRangePicker id="logistics-shipments-range" label="تاريخ التسليم" placeholder="اختر تاريخ التسليم" value={dateRange} onChange={setDateRange} /></div>
         </AdminSection>
         <ErrorNotice message={query.error instanceof Error ? query.error.message : null} />
@@ -860,7 +931,7 @@ export function LogisticsPlansPage() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string[]>([]);
   const [visible, setVisible] = useState<Record<PlanColumn, boolean>>({ select: true, reference: true, date: true, driver: true, district: true, shipments: true, status: true, distance: true, created: true });
-  const { sort: planSort, toggle: planToggle, sorted: planSorted } = useSort({ key: "date", direction: "asc" });
+  const { sort: planSort, toggle: planToggle, sorted: planSorted } = useSort({ key: "date", direction: "desc" });
   const query = useQuery({ queryKey: [...ROOT_QUERY, "plans"], queryFn: fetchLogisticsPlans });
   const driversQuery = useQuery({ queryKey: [...ROOT_QUERY, "drivers"], queryFn: fetchLogisticsDrivers, refetchInterval: 10000 });
   const drivers = driversQuery.data ?? [];
@@ -915,7 +986,7 @@ export function LogisticsPlansPage() {
           }
         >
           <div className="mb-4 flex gap-2 overflow-x-auto">
-            {[["all", "الكل"], ["draft", "مسودات"], ["active", "لدى الديسباتشر"], ["ready", "جاهزة"], ["in_progress", "قيد التنفيذ"], ["completed", "مكتملة"], ["cancelled", "ملغاة"]].map(([key, label]) => (
+            {[["all", "الكل"], ["draft", "مسودات"], ["active", "لدى الديسباتشر"], ["ready", "جاهزة"], ["in_progress", "قيد التنفيذ"], ["completed", "مكتملة"], ["not_executed", "لم يتم التنفيذ"], ["cancelled", "ملغاة"]].map(([key, label]) => (
               <button key={key} onClick={() => setTab(key)} className={`h-10 rounded-xl px-4 text-sm font-semibold transition ${tab === key ? "bg-brand-500 text-white" : "bg-brand-25 text-gray-700 hover:bg-brand-25 dark:bg-white/[0.02] dark:text-gray-200"}`}>{label}</button>
             ))}
           </div>
@@ -948,13 +1019,13 @@ export function LogisticsPlansPage() {
                           {visible.driver ? <td className="px-4 py-4">{plan.driverName ?? "بدون سائق"}</td> : null}
                           {visible.district ? <td className="px-4 py-4">{plan.district ?? "—"}</td> : null}
                           {visible.shipments ? <td className="px-4 py-4">{plan.shipmentCount}</td> : null}
-                          {visible.status ? <td className="px-4 py-4"><StatusBadge label={status.label} tone={status.tone} /></td> : null}
+                          {visible.status ? <td className="px-4 py-4"><StatusBadge label={status.label} tone={status.tone} />{plan.status === "not_executed" && (() => { const reason = notExecutedReasonLabel(plan.notExecutedReason); return reason ? <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{reason}</p> : null; })()}</td> : null}
                           {visible.distance ? <td className="px-4 py-4">{formatDistance(plan.routeDistanceKm)}</td> : null}
                           {visible.created ? <td className="px-4 py-4">{formatDate(plan.createdAt)}</td> : null}
                           <td className="px-4 py-4">
                             <div className="flex items-center gap-2">
                               <Link to={`/logistics/plans/draft/${plan.id}`} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-brand-25 dark:hover:bg-white/[0.02]" aria-label="فتح الخطة"><EyeIcon className="h-5 w-5" /></Link>
-                              {plan.status !== "completed" && plan.status !== "cancelled" && (
+                              {plan.status !== "completed" && plan.status !== "cancelled" && plan.status !== "not_executed" && (
                                 <select
                                   value=""
                                   onChange={(e) => {
@@ -1429,7 +1500,12 @@ export function LogisticsDraftPlanPage() {
           eyebrow="Draft Plan Workspace"
           title={plan.reference}
           description="مساحة العمل قبل ظهور الخطة للسائق. التأكيد هنا يرسلها إلى تجهيز الديسباتشر فقط."
-          meta={<StatusBadge label={status.label} tone={status.tone} />}
+          meta={
+            <div className="flex items-center gap-3">
+              <StatusBadge label={status.label} tone={status.tone} />
+              {plan.status === "not_executed" && (() => { const reason = notExecutedReasonLabel(plan.notExecutedReason); return reason ? <span className="text-sm font-medium text-red-600 dark:text-red-400">{reason}</span> : null; })()}
+            </div>
+          }
           actions={
             <>
               <ToolbarButton onClick={() => optimize.mutate()} disabled={optimize.isPending || shipments.length === 0}><RocketLaunchIcon className="h-4 w-4" />تحسين المسار</ToolbarButton>

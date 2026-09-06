@@ -6,6 +6,20 @@ import svgr from "vite-plugin-svgr";
 
 export default defineConfig({
   publicDir: "public",
+  server: {
+    proxy: {
+      "/driver": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+        ws: true,
+      },
+      "/dispatcher": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+        ws: true,
+      },
+    },
+  },
   plugins: [
     {
       name: "manifest-fallback",

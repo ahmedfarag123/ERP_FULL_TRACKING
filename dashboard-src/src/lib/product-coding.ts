@@ -31,11 +31,46 @@ export async function translateViaGoogle(input: {
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { brand?: string; product?: string };
-    if (typeof data.brand !== "string" || !data.brand) return null;
-    return { brand: data.brand, product: data.product ?? "" };
+    const p = data.product ?? "";
+    if (!input.brand && !p) return null;
+    return { brand: data.brand ?? "", product: p };
   } catch {
     return null;
   }
+}
+
+export async function verifyProductMeaningViaGoogle(
+  product: string
+): Promise<{ meaningful: boolean; reason?: string } | null> {
+  const text = (product ?? "").trim();
+  if (!text || !ARABIC_PATTERN.test(text)) return null;
+
+  try {
+    const forward = await translateViaGoogle({ brand: "", product: text, fromScript: "arabic" });
+    const enPreserved = forward?.product?.trim() ?? "";
+    if (!enPreserved) return null;
+
+    const back = await translateViaGoogle({ brand: "", product: enPreserved, fromScript: "latin" });
+    const arRoundTrip = (back?.product ?? back?.brand ?? "").trim();
+    if (!arRoundTrip) return null;
+
+    const jaccard = jaccardLetters(text, arRoundTrip);
+    if (jaccard < 0.4) {
+      return { meaningful: false, reason: "لا معنى واضحًا لهذه القيمة — تحقق من الاسم" };
+    }
+    return { meaningful: true };
+  } catch {
+    return null;
+  }
+}
+
+function jaccardLetters(a: string, b: string): number {
+  const setA = new Set(normalizeArName(a).replace(/\s+/g, ""));
+  const setB = new Set(normalizeArName(b).replace(/\s+/g, ""));
+  if (setA.size === 0 && setB.size === 0) return 1;
+  let inter = 0;
+  for (const c of setA) if (setB.has(c)) inter++;
+  return inter / (setA.size + setB.size - inter || 1);
 }
 
 const ARABIC_PATTERN = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/;
@@ -603,6 +638,9 @@ export function validateProductContent(input: string): ProductContentValidation 
       const arVowels = [...arLetters].filter((c) => /[اويىءة]/.test(c)).length;
       if (arVowels === 0 && distinct < 3) return true;
       if (/ه{2,}|ا{2,}|ي{2,}/.test(arLetters.join(""))) return true;
+      const ratio = arVowels / arLetters.length;
+      if (distinct <= 2) return true;
+      if (arLetters.length >= 4 && ratio < 0.18) return true;
       return false;
     }
     const latLetters = [...letters].filter((c) => !isArabicChar(c));
@@ -617,6 +655,15 @@ export function validateProductContent(input: string): ProductContentValidation 
     if (vowels === 0) return new Set(latText).size <= 2;
     return false;
   };
+
+  const digitsMergedWitharabic = words.filter((w) => /\d[\u0600-\u06FF]/.test(w) || /[\u0600-\u06FF]\d/.test(w));
+  if (digitsMergedWitharabic.length > 0) {
+    return {
+      valid: false,
+      reason: `يبدو القبض على «${digitsMergedWitharabic[0]}» — أدخل اسم منتج ليس فيه أرقام مدمجة`,
+      cleaned,
+    };
+  }
 
   const gibberish = words.filter(gibberishWord);
   if (gibberish.length > 0) {

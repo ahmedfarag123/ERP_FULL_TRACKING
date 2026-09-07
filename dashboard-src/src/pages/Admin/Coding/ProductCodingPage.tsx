@@ -31,6 +31,7 @@ import {
   translateViaGoogle,
   englishSizeUnit,
   validateProductContent,
+  verifyProductMeaningViaGoogle,
   SIZE_UNITS,
   computeNextCode,
   getCodePrefix,
@@ -689,6 +690,8 @@ function EntryTab(props: {
   const [cost, setCost] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [verifyingMeaning, setVerifyingMeaning] = useState(false);
+  const [meaningBlocked, setMeaningBlocked] = useState(false);
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
   const [extra, setExtra] = useState<ExtraState>(EMPTY_EXTRA);
   const [openGroups, setOpenGroups] = useState<Record<number, boolean>>({
@@ -844,8 +847,10 @@ function EntryTab(props: {
     setSizeAmount("");
     setSizeUnit("");
     setPackQty("");
-    setLiveTranslated(null);
+setLiveTranslated(null);
     setTranslationLoading(false);
+    setVerifyingMeaning(false);
+    setMeaningBlocked(false);
     setExtra(EMPTY_EXTRA);
   };
 
@@ -919,8 +924,9 @@ function EntryTab(props: {
     });
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setError(null);
+    setMeaningBlocked(false);
     const brandName = (brandSelected?.name ?? brandQuery.trim()).trim();
     if (!brandName) return setError("البراند مطلوب — اختر من القائمة أو اكتب اسمًا ثم اضغط «إضافة براند جديد»");
     if (!main) return setError("اختر القسم الرئيسي");
@@ -933,6 +939,18 @@ function EntryTab(props: {
     if (!contentCheck.valid) {
       setError(contentCheck.reason ?? "قيمة غير مفهومة");
       return;
+    }
+
+    setVerifyingMeaning(true);
+    try {
+      const meaningCheck = await verifyProductMeaningViaGoogle(normalizedProduct);
+      if (meaningCheck && !meaningCheck.meaningful) {
+        setMeaningBlocked(true);
+        setError(meaningCheck.reason ?? "لا معنى واضحًا لهذه القيمة — تحقق من الاسم");
+        return;
+      }
+    } finally {
+      setVerifyingMeaning(false);
     }
 
     const prefix = getCodePrefix(selectedTree);
@@ -1069,9 +1087,12 @@ function EntryTab(props: {
         <AdminField label="المنتج / المحتوى" helper="مثال: سيرب فراولة، بطاطس مقلي، طماطم مصفاة">
           <input
             value={product}
-            onChange={(e) => setProduct(e.target.value)}
+            onChange={(e) => {
+              setProduct(e.target.value);
+              setMeaningBlocked(false);
+            }}
             className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-gray-900 dark:bg-gray-800 dark:text-white ${
-              product.trim() && !productValidation.valid
+              product.trim() && (!productValidation.valid || meaningBlocked)
                 ? "border-red-400 focus:border-red-400 focus:ring-2 focus:ring-red-400 dark:border-red-500"
                 : "border-gray-300 dark:border-gray-700"
             }`}
@@ -1080,6 +1101,12 @@ function EntryTab(props: {
             <p className="mt-1 flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400">
               <span>⚠</span>
               <span>{productValidation.reason}</span>
+            </p>
+          ) : null}
+          {meaningBlocked ? (
+            <p className="mt-1 flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400">
+              <span>⛔</span>
+              <span>هذه القيمة لا معنى واضحًا لها — اكتب اسم منتج حقيقي (مثل «سيرب فراولة»)</span>
             </p>
           ) : null}
         </AdminField>
@@ -1358,10 +1385,10 @@ function EntryTab(props: {
       <div className="mt-6 flex flex-wrap gap-3">
         <button
           onClick={handleSubmit}
-          disabled={props.loading || (!!product.trim() && !productValidation.valid)}
+          disabled={props.loading || verifyingMeaning || (!!product.trim() && !productValidation.valid)}
           className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {props.loading ? "جارٍ الحفظ..." : "حفظ التكويد"}
+          {verifyingMeaning ? "جارٍ التحقق من المعنى..." : props.loading ? "جارٍ الحفظ..." : "حفظ التكويد"}
         </button>
         <button
           onClick={reset}

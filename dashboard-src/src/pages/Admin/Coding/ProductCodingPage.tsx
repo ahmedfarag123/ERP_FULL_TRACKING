@@ -689,7 +689,6 @@ function EntryTab(props: {
   const [cost, setCost] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [contentError, setContentError] = useState<string | null>(null);
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
   const [extra, setExtra] = useState<ExtraState>(EMPTY_EXTRA);
   const [openGroups, setOpenGroups] = useState<Record<number, boolean>>({
@@ -726,6 +725,11 @@ function EntryTab(props: {
     if (!check.valid) return built;
     return buildProductName({ ...parts, product: check.cleaned ?? product });
   }, [built, parts, product]);
+  const productValidation = useMemo<Awaited<ReturnType<typeof validateProductContent>>>(() => {
+    if (!product.trim()) return { valid: true, reason: undefined, cleaned: product.trim() };
+    return validateProductContent(product);
+  }, [product]);
+  const hasContent = product.trim().length > 0 || sizeAmount.trim().length > 0;
   const suggested = useMemo(() => {
     const brandName = brandSelected?.name ?? brandQuery.trim();
     if (!brandName && !product.trim()) return null;
@@ -842,7 +846,6 @@ function EntryTab(props: {
     setPackQty("");
     setLiveTranslated(null);
     setTranslationLoading(false);
-    setContentError(null);
     setExtra(EMPTY_EXTRA);
   };
 
@@ -925,13 +928,12 @@ function EntryTab(props: {
     if (!selectedTree) return setError("القسم/الفرع غير موجود في الشجرة");
     if (!product.trim() && !sizeAmount.trim()) return setError("أدخل اسم المنتج أو المحتوى بعد البراند");
 
-    const contentCheck = validateProductContent(product);
+    const contentCheck = productValidation;
     const normalizedProduct = contentCheck.cleaned ?? product.trim();
     if (!contentCheck.valid) {
-      setContentError(contentCheck.reason ?? "قيمة غير مفهومة");
+      setError(contentCheck.reason ?? "قيمة غير مفهومة");
       return;
     }
-    setContentError(null);
 
     const prefix = getCodePrefix(selectedTree);
     let code = "";
@@ -1067,18 +1069,17 @@ function EntryTab(props: {
         <AdminField label="المنتج / المحتوى" helper="مثال: سيرب فراولة، بطاطس مقلي، طماطم مصفاة">
           <input
             value={product}
-            onChange={(e) => {
-              setProduct(e.target.value);
-              if (contentError) setContentError(null);
-            }}
-            className={`w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white ${
-              contentError ? "border-red-400 focus:border-red-400 focus:ring-red-400 dark:border-red-500" : ""
+            onChange={(e) => setProduct(e.target.value)}
+            className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-gray-900 dark:bg-gray-800 dark:text-white ${
+              product.trim() && !productValidation.valid
+                ? "border-red-400 focus:border-red-400 focus:ring-2 focus:ring-red-400 dark:border-red-500"
+                : "border-gray-300 dark:border-gray-700"
             }`}
           />
-          {contentError ? (
+          {product.trim() && !productValidation.valid ? (
             <p className="mt-1 flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400">
               <span>⚠</span>
-              <span>{contentError}</span>
+              <span>{productValidation.reason}</span>
             </p>
           ) : null}
         </AdminField>
@@ -1357,8 +1358,8 @@ function EntryTab(props: {
       <div className="mt-6 flex flex-wrap gap-3">
         <button
           onClick={handleSubmit}
-          disabled={props.loading}
-          className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+          disabled={props.loading || (!!product.trim() && !productValidation.valid)}
+          className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {props.loading ? "جارٍ الحفظ..." : "حفظ التكويد"}
         </button>

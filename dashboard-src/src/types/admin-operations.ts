@@ -5,6 +5,7 @@ export type LegacyRole =
   | "dispatcher"
   | "driver"
   | "supervisor"
+  | "employee"
   | "sales_agent"
   | "telesales"
   | "unknown";

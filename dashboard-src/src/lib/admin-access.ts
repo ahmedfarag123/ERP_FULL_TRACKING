@@ -61,6 +61,7 @@ export const ADMIN_ROLE_ORDER: AdminManagedRole[] = [
   "dispatcher",
   "driver",
   "supervisor",
+  "employee",
   "sales_agent",
   "telesales",
 ];
@@ -276,6 +277,7 @@ export const ROLE_MODULE_ACCESS: Record<AdminManagedRole, AdminModuleKey[]> = {
   dispatcher: ["dashboard", "orders"],
   driver: [],
   supervisor: ["dashboard", "orders", "customers", "visits", "calls", "tickets"],
+  employee: ["dashboard"],
   sales_agent: ["customers", "visits", "calls", "tickets"],
   telesales: ["dashboard", "orders", "customers", "calls", "tickets"],
 };
@@ -351,6 +353,7 @@ export const ROLE_PERMISSION_ACCESS: Record<AdminManagedRole, AdminPermissionKey
     "tickets.view",
     "tickets.manage",
   ],
+  employee: ["dashboard.view"],
 };
 
 export const AUTH_CYCLE_STEPS = [
@@ -394,6 +397,8 @@ export function getRoleSummary(role: AdminManagedRole) {
       return "Driver app access for assigned delivery work.";
     case "supervisor":
       return "Team oversight for customer operations, visits, calls, and order visibility.";
+    case "employee":
+      return "General staff role with standard dashboard access.";
     case "sales_agent":
       return "Field execution focused on customers, visits, and calls.";
     case "telesales":

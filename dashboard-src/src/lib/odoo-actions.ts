@@ -37,6 +37,7 @@ function ensureManagedRole(value: string | null | undefined): ManagedRole {
     case "dispatcher":
     case "driver":
     case "supervisor":
+    case "employee":
     case "sales_agent":
     case "telesales":
       return String(value).trim().toLowerCase() as ManagedRole;

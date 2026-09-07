@@ -85,6 +85,7 @@ const ROLE_ORDER: ManagedRole[] = [
   "dispatcher",
   "driver",
   "supervisor",
+  "employee",
   "sales_agent",
   "telesales",
 ];
@@ -96,6 +97,7 @@ const ROLE_LABELS: Record<ManagedRole, string> = {
   dispatcher: "Dispatcher",
   driver: "Driver",
   supervisor: "Supervisor",
+  employee: "موظف",
   sales_agent: "Sales Agent",
   telesales: "Telesales",
 };
@@ -118,6 +120,8 @@ export function getRoleTone(role: ManagedRole): string {
       return "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-500/20 dark:bg-purple-500/10 dark:text-purple-300";
     case "supervisor":
       return "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-500/20 dark:bg-indigo-500/10 dark:text-indigo-300";
+    case "employee":
+      return "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-300";
     case "sales_agent":
       return "border-green-200 bg-green-50 text-green-700 dark:border-green-500/20 dark:bg-green-500/10 dark:text-green-300";
     case "telesales":
@@ -146,6 +150,7 @@ function ensureManagedRole(value: string | null | undefined): ManagedRole {
     case "dispatcher":
     case "driver":
     case "supervisor":
+    case "employee":
     case "sales_agent":
     case "telesales":
       return String(value).trim().toLowerCase() as ManagedRole;

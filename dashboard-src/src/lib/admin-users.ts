@@ -61,6 +61,7 @@ function ensureRole(value: string | null | undefined): AdminManagedRole {
     case "dispatcher":
     case "driver":
     case "supervisor":
+    case "employee":
     case "sales_agent":
     case "telesales":
       return String(value).trim().toLowerCase() as AdminManagedRole;
@@ -112,6 +113,8 @@ export function getAdminRoleLabel(role: AdminManagedRole): string {
       return "Driver";
     case "supervisor":
       return "Supervisor";
+    case "employee":
+      return "موظف";
     case "sales_agent":
       return "Sales Agent";
     case "telesales":
@@ -133,6 +136,8 @@ export function getAdminRoleTone(role: AdminManagedRole): string {
       return "border-purple-200 bg-purple-50 text-purple-700";
     case "supervisor":
       return "border-violet-200 bg-violet-50 text-violet-700";
+    case "employee":
+      return "border-slate-200 bg-slate-50 text-slate-700";
     case "sales_agent":
       return "border-emerald-200 bg-emerald-50 text-emerald-700";
     case "telesales":

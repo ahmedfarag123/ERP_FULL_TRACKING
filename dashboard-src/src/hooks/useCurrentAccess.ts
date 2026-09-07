@@ -65,6 +65,7 @@ function normalizeRole(role: string | null | undefined): ManagedRole | null {
     case "dispatcher":
     case "driver":
     case "supervisor":
+    case "employee":
     case "sales_agent":
     case "telesales":
       return String(role).trim().toLowerCase() as ManagedRole;

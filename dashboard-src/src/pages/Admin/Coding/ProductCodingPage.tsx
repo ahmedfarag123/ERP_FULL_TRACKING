@@ -122,52 +122,42 @@ type ExtraFieldDef = {
   options?: { value: string; label: string }[];
   dir?: "ltr";
   helper?: string;
+  readonly?: boolean;
 };
 
-const EXTRA_GROUP_DEFS: { title: string; fields: ExtraFieldDef[] }[] = [
-  {
-    title: "هوية المنتج",
-    fields: [
-      { key: "barcode", label: "الباركود (Barcode)", kind: "text", dir: "ltr", helper: "مثال: 6221050195887" },
-      { key: "hs_code", label: "كود HS الجمركي", kind: "text", dir: "ltr", helper: "مثال: 040690" },
-      {
-        key: "product_type", label: "نوع المنتج", kind: "select", options: [
-          { value: "product", label: "منتج (للتخزين)" },
-          { value: "consu", label: "مستهلك (لا يُخزّن)" },
-          { value: "service", label: "خدمة" },
-        ],
-      },
-      {
-        key: "track_method", label: "طريقة التتبع", kind: "select", options: [
-          { value: "none", label: "بدون تتبع" },
-          { value: "lot", label: "دفعات (Lot)" },
-          { value: "serial", label: "أرقام تسلسلية (Serial)" },
-        ],
-      },
-      { key: "country_of_origin", label: "بلد المنشأ", kind: "text" },
-      { key: "tags", label: "الوسوم (Tags)", kind: "text", helper: "تُفصل بفواصل: chill:0,chill:1,halal" },
-      { key: "warehouse", label: "المستودع", kind: "text", helper: "مثال: Warehouse 1" },
-      { key: "location", label: "الموقع", kind: "text", helper: "مثال: A-01-02" },
-    ],
-  },
+const UOM_OPTIONS = [
+  { value: "unit", label: "وحدة (unit)" },
+  { value: "kg", label: "كجم (kg)" },
+  { value: "g", label: "جرام (g)" },
+  { value: "L", label: "لتر (L)" },
+  { value: "ml", label: "مل (ml)" },
+  { value: "box", label: "كارتون (box)" },
+  { value: "pack", label: "عبوة (pack)" },
+  { value: "pcs", label: "قطعة (pcs)" },
+  { value: "ton", label: "طن (ton)" },
+];
+
+const EXTRA_GROUP_DEFS: { title: string; readonly?: boolean; fields: ExtraFieldDef[] }[] = [
   {
     title: "المبيعات والشراء",
     fields: [
       { key: "sale_ok", label: "متاح للبيع", kind: "bool" },
       { key: "purchase_ok", label: "متاح للشراء", kind: "bool" },
-      { key: "uom_sale", label: "وحدة البيع", kind: "text", dir: "ltr", helper: "مثال: kg, unit, box" },
-      { key: "uom_purchase", label: "وحدة الشراء", kind: "text", dir: "ltr" },
+      { key: "uom_sale", label: "وحدة البيع", kind: "select", options: UOM_OPTIONS },
+      { key: "uom_purchase", label: "وحدة الشراء", kind: "select", options: UOM_OPTIONS },
       { key: "taxes_sale", label: "ضرائب البيع", kind: "text", dir: "ltr", helper: "أكواد مفصولة بفواصل" },
       { key: "taxes_purchase", label: "ضرائب الشراء", kind: "text", dir: "ltr" },
-      { key: "sale_delay", label: "مهلة التسليم (أيام)", kind: "number", dir: "ltr" },
       {
-        key: "purchase_method", label: "طريقة الشراء", kind: "select", options: [
+        key: "sale_delay", label: "مهلة التسليم (أيام)", kind: "number", dir: "ltr", readonly: true,
+      },
+      {
+        key: "purchase_method", label: "طريقة الشراء", kind: "select", readonly: true, options: [
           { value: "purchase", label: "شراء / تصنيع" },
           { value: "receive", label: "استلام فقط (Receive in Advance)" },
         ],
       },
       {
-        key: "invoice_policy", label: "سياسة الفوترة", kind: "select", options: [
+        key: "invoice_policy", label: "سياسة الفوترة", kind: "select", readonly: true, options: [
           { value: "order", label: "عند الطلب (Order)" },
           { value: "delivery", label: "عند التسليم (Delivery)" },
         ],
@@ -176,25 +166,27 @@ const EXTRA_GROUP_DEFS: { title: string; fields: ExtraFieldDef[] }[] = [
   },
   {
     title: "المخزون والصلاحية",
+    readonly: true,
     fields: [
-      { key: "is_storable", label: "منتج مخزني", kind: "bool" },
-      { key: "use_expiration", label: "تفعيل تاريخ الانتهاء", kind: "bool" },
-      { key: "weight", label: "الوزن (كجم)", kind: "number", dir: "ltr" },
-      { key: "volume", label: "الحجم (م³)", kind: "number", dir: "ltr" },
-      { key: "expiry_days", label: "أيام حتى الانتهاء (Expiry)", kind: "number", dir: "ltr" },
-      { key: "best_before_days", label: "أيام أفضل قبل (Best Before)", kind: "number", dir: "ltr" },
-      { key: "alert_time", label: "مهلة التنبيه قبل الانتهاء (أيام)", kind: "number", dir: "ltr" },
-      { key: "removal_time", label: "مهلة الإزالة بعد الانتهاء (أيام)", kind: "number", dir: "ltr" },
-      { key: "reordering_min_qty", label: "كمية إعادة الطلب (حد أدنى)", kind: "number", dir: "ltr" },
-      { key: "reordering_max_qty", label: "كمية إعادة الطلب (حد أقصى)", kind: "number", dir: "ltr" },
+      { key: "is_storable", label: "منتج مخزني", kind: "bool", readonly: true },
+      { key: "use_expiration", label: "تفعيل تاريخ الانتهاء", kind: "bool", readonly: true },
+      { key: "weight", label: "الوزن (كجم)", kind: "number", dir: "ltr", readonly: true },
+      { key: "volume", label: "الحجم (م³)", kind: "number", dir: "ltr", readonly: true },
+      { key: "expiry_days", label: "أيام حتى الانتهاء (Expiry)", kind: "number", dir: "ltr", readonly: true },
+      { key: "best_before_days", label: "أيام أفضل قبل (Best Before)", kind: "number", dir: "ltr", readonly: true },
+      { key: "alert_time", label: "مهلة التنبيه قبل الانتهاء (أيام)", kind: "number", dir: "ltr", readonly: true },
+      { key: "removal_time", label: "مهلة الإزالة بعد الانتهاء (أيام)", kind: "number", dir: "ltr", readonly: true },
+      { key: "reordering_min_qty", label: "كمية إعادة الطلب (حد أدنى)", kind: "number", dir: "ltr", readonly: true },
+      { key: "reordering_max_qty", label: "كمية إعادة الطلب (حد أقصى)", kind: "number", dir: "ltr", readonly: true },
     ],
   },
   {
     title: "الأوصاف والملاحظات",
+    readonly: true,
     fields: [
-      { key: "note", label: "ملاحظات عامة", kind: "textarea" },
-      { key: "description_sale", label: "وصف البيع", kind: "textarea" },
-      { key: "description_purchase", label: "وصف الشراء", kind: "textarea" },
+      { key: "note", label: "ملاحظات عامة", kind: "textarea", readonly: true },
+      { key: "description_sale", label: "وصف البيع", kind: "textarea", readonly: true },
+      { key: "description_purchase", label: "وصف الشراء", kind: "textarea", readonly: true },
     ],
   },
 ];
@@ -702,7 +694,6 @@ function EntryTab(props: {
     0: true,
     1: false,
     2: false,
-    3: false,
   });
 
   const setField = (key: keyof ExtraState, value: string | boolean) =>
@@ -1270,8 +1261,10 @@ function EntryTab(props: {
           >
             {group.fields.map((field) => {
               const value = extra[field.key];
+              const disabled = group.readonly || field.readonly;
               const baseCls =
                 "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white";
+              const disabledCls = "w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400";
               if (field.kind === "bool") {
                 return (
                   <label key={field.key} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -1279,6 +1272,7 @@ function EntryTab(props: {
                       type="checkbox"
                       checked={Boolean(value)}
                       onChange={(e) => setField(field.key, e.target.checked)}
+                      disabled={disabled}
                       className="h-4 w-4"
                     />
                     <span>{field.label}</span>
@@ -1291,7 +1285,8 @@ function EntryTab(props: {
                     <select
                       value={String(value)}
                       onChange={(e) => setField(field.key, e.target.value)}
-                      className={baseCls}
+                      disabled={disabled}
+                      className={disabled ? disabledCls : baseCls}
                     >
                       <option value="">—</option>
                       {(field.options ?? []).map((o) => (
@@ -1309,7 +1304,8 @@ function EntryTab(props: {
                       onChange={(e) => setField(field.key, e.target.value)}
                       rows={2}
                       dir={field.dir ?? "rtl"}
-                      className={`${baseCls} min-h-[60px]`}
+                      disabled={disabled}
+                      className={`${disabled ? disabledCls : baseCls} min-h-[60px]`}
                     />
                   </AdminField>
                 );
@@ -1321,7 +1317,8 @@ function EntryTab(props: {
                     onChange={(e) => setField(field.key, e.target.value)}
                     type={field.kind === "number" ? "number" : "text"}
                     dir={field.dir ?? "rtl"}
-                    className={baseCls}
+                    disabled={disabled}
+                    className={disabled ? disabledCls : baseCls}
                   />
                 </AdminField>
               );

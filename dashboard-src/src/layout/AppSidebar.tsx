@@ -77,6 +77,11 @@ const navItems: NavItem[] = [
     path: "/crm",
   },
   {
+    name: "التكويد",
+    icon: <BoltIcon />,
+    path: "/coding",
+  },
+  {
     name: "الزيارات",
     icon: <ListIcon />,
     path: "/visits",
@@ -214,6 +219,7 @@ const AppSidebar: React.FC = () => {
     (items: NavItem[]) =>
       items.filter((item) => {
         if (item.name === "إدارة المستخدمين" && authUser?.email !== "ahmed-farag@hs.com") return false;
+        if (item.name === "التكويد" && authUser?.email !== "ahmed-farag@hs.com") return false;
 
         if (item.subItems?.length) {
           return getVisibleSubItems(item).length > 0;

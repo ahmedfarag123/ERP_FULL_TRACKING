@@ -4,6 +4,7 @@ import { AppErrorBoundary } from "../lib/AppErrorBoundary";
 import ForcePasswordChangeRoute from "./components/auth/ForcePasswordChangeRoute";
 import PermissionRoute from "./components/auth/PermissionRoute";
 import SuperAdminRoute from "./components/auth/SuperAdminRoute";
+import CodingRoute from "./components/auth/CodingRoute";
 import PublicOnlyRoute from "./components/auth/PublicOnlyRoute";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import RouteFallback from "./components/common/RouteFallback";
@@ -82,6 +83,7 @@ const CostCentersPage = lazy(() => import("./pages/Admin/Finance/CostCentersPage
 const FinancialReportsPage = lazy(() => import("./pages/Admin/Finance/FinancialReportsPage"));
 const FinanceSettingsPage = lazy(() => import("./pages/Admin/Finance/FinanceSettingsPage"));
 const FinanceAuditLogPage = lazy(() => import("./pages/Admin/Finance/FinanceAuditLogPage"));
+const ProductCodingPage = lazy(() => import("./pages/Admin/Coding/ProductCodingPage"));
 const SignIn = lazy(() => import("./pages/AuthPages/SignIn"));
 const SignUp = lazy(() => import("./pages/AuthPages/SignUp"));
 const ForcePasswordChange = lazy(() => import("./pages/AuthPages/ForcePasswordChange"));
@@ -174,6 +176,9 @@ export default function App() {
                 <Route path="/finance/audit-log" element={<FinanceAuditLogPage />} />
               </Route>
               <Route path="/profile" element={<ProfilePage />} />
+              <Route element={<CodingRoute />}>
+                <Route path="/coding" element={<ProductCodingPage />} />
+              </Route>
               <Route
                 element={
                   <PermissionRoute

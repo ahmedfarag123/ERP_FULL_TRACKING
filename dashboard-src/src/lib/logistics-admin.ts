@@ -804,6 +804,23 @@ export async function fetchShipmentCandidates(range: DateRangeValue): Promise<Sh
     });
 }
 
+function derivePlanDistrict(candidates: ShipmentCandidate[]): string | null {
+  const counts = new Map<string, number>();
+  for (const candidate of candidates) {
+    const label = candidate.district?.trim() || candidate.governorate?.trim();
+    if (label) counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [label, count] of counts) {
+    if (count > bestCount) {
+      best = label;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
 export async function createPlanFromOrders(input: {
   driverId: string;
   plannedDate: string;
@@ -815,7 +832,8 @@ export async function createPlanFromOrders(input: {
     throw new Error("اختر شحنة واحدة على الأقل.");
   }
 
-  const planId = await createForcedDeliveryPlan(input.driverId, input.plannedDate, input.notes ?? null, input.district ?? null);
+  const district = input.district?.trim() || derivePlanDistrict(input.candidates);
+  const planId = await createForcedDeliveryPlan(input.driverId, input.plannedDate, input.notes ?? null, district);
 
   const scheduledAt = scheduledAtForDate(input.plannedDate);
   const assignedShipments: Array<{ shipmentId: string; orderId: string }> = [];

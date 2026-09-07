@@ -2023,7 +2023,8 @@ export type Database = {
       "district": string | null,
       "return_of_plan_id": string | null,
       "assigned_profile_id_full_name": string | null,
-      "created_by_profile_id_full_name": string | null
+      "created_by_profile_id_full_name": string | null,
+      "not_executed_reason": string | null
       }
         Insert: {
       "id": string | null,
@@ -2046,7 +2047,8 @@ export type Database = {
       "district": string | null,
       "return_of_plan_id": string | null,
       "assigned_profile_id_full_name": string | null,
-      "created_by_profile_id_full_name": string | null
+      "created_by_profile_id_full_name": string | null,
+      "not_executed_reason": string | null
       }
         Update: {
       "id": string | null,
@@ -2069,7 +2071,8 @@ export type Database = {
       "district": string | null,
       "return_of_plan_id": string | null,
       "assigned_profile_id_full_name": string | null,
-      "created_by_profile_id_full_name": string | null
+      "created_by_profile_id_full_name": string | null,
+      "not_executed_reason": string | null
       }
         Relationships: []
       }
@@ -4176,7 +4179,7 @@ export type Database = {
       "order_tickets": {
         Row: {
       "id": string,
-      "order_id": string,
+      "order_id": string | null,
       "customer_id": string | null,
       "subject": string,
       "description": string | null,
@@ -4184,18 +4187,21 @@ export type Database = {
       "priority": Database["public"]["Enums"]["ticket_priority"],
       "category": string | null,
       "assigned_to": string | null,
-      "created_by": string,
+      "created_by": string | null,
       "resolved_at": string | null,
       "closed_at": string | null,
       "raw_payload": Json | null,
       "created_at": string,
       "updated_at": string,
       "assigned_to_full_name": string | null,
-      "created_by_full_name": string | null
+      "created_by_full_name": string | null,
+      "scope": string,
+      "assigned_departments": string[],
+      "assigned_user_ids": string[]
       }
         Insert: {
       "id": string | null,
-      "order_id": string,
+      "order_id": string | null,
       "customer_id": string | null,
       "subject": string,
       "description": string | null,
@@ -4203,14 +4209,17 @@ export type Database = {
       "priority": Database["public"]["Enums"]["ticket_priority"] | null,
       "category": string | null,
       "assigned_to": string | null,
-      "created_by": string,
+      "created_by": string | null,
       "resolved_at": string | null,
       "closed_at": string | null,
       "raw_payload": Json | null,
       "created_at": string | null,
       "updated_at": string | null,
       "assigned_to_full_name": string | null,
-      "created_by_full_name": string | null
+      "created_by_full_name": string | null,
+      "scope": string | null,
+      "assigned_departments": string[] | null,
+      "assigned_user_ids": string[] | null
       }
         Update: {
       "id": string | null,
@@ -4229,7 +4238,10 @@ export type Database = {
       "created_at": string | null,
       "updated_at": string | null,
       "assigned_to_full_name": string | null,
-      "created_by_full_name": string | null
+      "created_by_full_name": string | null,
+      "scope": string | null,
+      "assigned_departments": string[] | null,
+      "assigned_user_ids": string[] | null
       }
         Relationships: []
       }
@@ -5880,6 +5892,360 @@ export type Database = {
       }
         Relationships: []
       }
+      "supabase_partners": {
+        Row: {
+      "id": number,
+      "name": string | null,
+      "ref": string | null,
+      "email": string | null,
+      "phone": string | null,
+      "mobile": string | null,
+      "city": string | null,
+      "region": string | null,
+      "area": string | null,
+      "street": string | null,
+      "user_id": number | null,
+      "company_id": number | null,
+      "is_customer": boolean | null,
+      "is_company": boolean | null,
+      "active": boolean | null,
+      "parent_id": number | null,
+      "created_at": string | null,
+      "updated_at": string | null
+      }
+        Insert: {
+      "id": number,
+      "name": string | null,
+      "ref": string | null,
+      "email": string | null,
+      "phone": string | null,
+      "mobile": string | null,
+      "city": string | null,
+      "region": string | null,
+      "area": string | null,
+      "street": string | null,
+      "user_id": number | null,
+      "company_id": number | null,
+      "is_customer": boolean | null,
+      "is_company": boolean | null,
+      "active": boolean | null,
+      "parent_id": number | null,
+      "created_at": string | null,
+      "updated_at": string | null
+      }
+        Update: {
+      "id": number | null,
+      "name": string | null,
+      "ref": string | null,
+      "email": string | null,
+      "phone": string | null,
+      "mobile": string | null,
+      "city": string | null,
+      "region": string | null,
+      "area": string | null,
+      "street": string | null,
+      "user_id": number | null,
+      "company_id": number | null,
+      "is_customer": boolean | null,
+      "is_company": boolean | null,
+      "active": boolean | null,
+      "parent_id": number | null,
+      "created_at": string | null,
+      "updated_at": string | null
+      }
+        Relationships: []
+      }
+      "odoo_users": {
+        Row: {
+      "id": number,
+      "name": string | null,
+      "login": string | null,
+      "email": string | null,
+      "company_id": number | null,
+      "active": boolean | null
+      }
+        Insert: {
+      "id": number,
+      "name": string | null,
+      "login": string | null,
+      "email": string | null,
+      "company_id": number | null,
+      "active": boolean | null
+      }
+        Update: {
+      "id": number | null,
+      "name": string | null,
+      "login": string | null,
+      "email": string | null,
+      "company_id": number | null,
+      "active": boolean | null
+      }
+        Relationships: []
+      }
+      "procurement_intercompany_customer_exclusions": {
+        Row: {
+      "id": number,
+      "company_id": number | null,
+      "normalized_customer_name": string | null,
+      "is_active": boolean | null
+      }
+        Insert: {
+      "id": number | null,
+      "company_id": number | null,
+      "normalized_customer_name": string | null,
+      "is_active": boolean | null
+      }
+        Update: {
+      "id": number | null,
+      "company_id": number | null,
+      "normalized_customer_name": string | null,
+      "is_active": boolean | null
+      }
+        Relationships: []
+      }
+      "customer_geography_odoo18": {
+        Row: {
+      "customer_id": number,
+      "governorate_code": string | null,
+      "area_code": string | null,
+      "governorate_name": string | null,
+      "area_name": string | null
+      }
+        Insert: {
+      "customer_id": number,
+      "governorate_code": string | null,
+      "area_code": string | null,
+      "governorate_name": string | null,
+      "area_name": string | null
+      }
+        Update: {
+      "customer_id": number | null,
+      "governorate_code": string | null,
+      "area_code": string | null,
+      "governorate_name": string | null,
+      "area_name": string | null
+      }
+        Relationships: []
+      }
+      "analytics_catalog": {
+        Row: {
+      "object_name": string,
+      "object_type": string | null,
+      "domain": string | null,
+      "description": string | null,
+      "status": string | null,
+      "refresh_frequency": string | null,
+      "primary_key": string | null,
+      "date_field": string | null,
+      "created_at": string | null,
+      "updated_at": string | null
+      }
+        Insert: {
+      "object_name": string,
+      "object_type": string | null,
+      "domain": string | null,
+      "description": string | null,
+      "status": string | null,
+      "refresh_frequency": string | null,
+      "primary_key": string | null,
+      "date_field": string | null,
+      "created_at": string | null,
+      "updated_at": string | null
+      }
+        Update: {
+      "object_name": string | null,
+      "object_type": string | null,
+      "domain": string | null,
+      "description": string | null,
+      "status": string | null,
+      "refresh_frequency": string | null,
+      "primary_key": string | null,
+      "date_field": string | null,
+      "created_at": string | null,
+      "updated_at": string | null
+      }
+        Relationships: []
+      }
+      "ticket_items": {
+        Row: {
+      "id": string,
+      "ticket_id": string,
+      "order_line_item_id": string | null,
+      "product_name": string,
+      "product_code": string | null,
+      "category": string | null,
+      "priority": Database["public"]["Enums"]["ticket_priority"],
+      "description": string | null,
+      "due_date": string | null,
+      "assigned_departments": string[],
+      "assigned_user_ids": string[],
+      "status": Database["public"]["Enums"]["ticket_status"],
+      "resolved_at": string | null,
+      "created_at": string,
+      "updated_at": string
+      }
+        Insert: {
+      "id": string | null,
+      "ticket_id": string,
+      "order_line_item_id": string | null,
+      "product_name": string,
+      "product_code": string | null,
+      "category": string | null,
+      "priority": Database["public"]["Enums"]["ticket_priority"] | null,
+      "description": string | null,
+      "due_date": string | null,
+      "assigned_departments": string[] | null,
+      "assigned_user_ids": string[] | null,
+      "status": Database["public"]["Enums"]["ticket_status"] | null,
+      "resolved_at": string | null,
+      "created_at": string | null,
+      "updated_at": string | null
+      }
+        Update: {
+      "id": string | null,
+      "ticket_id": string | null,
+      "order_line_item_id": string | null,
+      "product_name": string | null,
+      "product_code": string | null,
+      "category": string | null,
+      "priority": Database["public"]["Enums"]["ticket_priority"] | null,
+      "description": string | null,
+      "due_date": string | null,
+      "assigned_departments": string[] | null,
+      "assigned_user_ids": string[] | null,
+      "status": Database["public"]["Enums"]["ticket_status"] | null,
+      "resolved_at": string | null,
+      "created_at": string | null,
+      "updated_at": string | null
+      }
+        Relationships: []
+      }
+      "coding_tree": {
+        Row: {
+      "dept_digit": number,
+      "sub_digits": number | null,
+      "main_category": string,
+      "sub_category": string | null,
+      "sort_order": number,
+      "created_at": string,
+      "id": number
+      }
+        Insert: {
+      "dept_digit": number,
+      "sub_digits": number | null,
+      "main_category": string,
+      "sub_category": string | null,
+      "sort_order": number | null,
+      "created_at": string | null,
+      "id": number | null
+      }
+        Update: {
+      "dept_digit": number | null,
+      "sub_digits": number | null,
+      "main_category": string | null,
+      "sub_category": string | null,
+      "sort_order": number | null,
+      "created_at": string | null,
+      "id": number | null
+      }
+        Relationships: []
+      }
+      "product_coding": {
+        Row: {
+      "new_code": string,
+      "old_code": string | null,
+      "external_product_id": string | null,
+      "original_name": string,
+      "normalized_name": string,
+      "english_name": string,
+      "main_category": string,
+      "sub_category": string,
+      "sale_price": number,
+      "cost": number,
+      "is_active": boolean,
+      "validation_status": string,
+      "validation_notes": string,
+      "source": string,
+      "created_by": string | null,
+      "created_at": string,
+      "updated_at": string,
+      "brand": string | null,
+      "brand_normalized": string | null
+      }
+        Insert: {
+      "new_code": string,
+      "old_code": string | null,
+      "external_product_id": string | null,
+      "original_name": string,
+      "normalized_name": string | null,
+      "english_name": string | null,
+      "main_category": string,
+      "sub_category": string,
+      "sale_price": number | null,
+      "cost": number | null,
+      "is_active": boolean | null,
+      "validation_status": string | null,
+      "validation_notes": string | null,
+      "source": string | null,
+      "created_by": string | null,
+      "created_at": string | null,
+      "updated_at": string | null,
+      "brand": string | null,
+      "brand_normalized": string | null
+      }
+        Update: {
+      "new_code": string | null,
+      "old_code": string | null,
+      "external_product_id": string | null,
+      "original_name": string | null,
+      "normalized_name": string | null,
+      "english_name": string | null,
+      "main_category": string | null,
+      "sub_category": string | null,
+      "sale_price": number | null,
+      "cost": number | null,
+      "is_active": boolean | null,
+      "validation_status": string | null,
+      "validation_notes": string | null,
+      "source": string | null,
+      "created_by": string | null,
+      "created_at": string | null,
+      "updated_at": string | null,
+      "brand": string | null,
+      "brand_normalized": string | null
+      }
+        Relationships: []
+      }
+      "product_brands": {
+        Row: {
+      "id": string,
+      "name": string,
+      "name_normalized": string,
+      "name_en": string,
+      "sort_order": number,
+      "created_by": string | null,
+      "created_at": string
+      }
+        Insert: {
+      "id": string | null,
+      "name": string,
+      "name_normalized": string,
+      "name_en": string | null,
+      "sort_order": number | null,
+      "created_by": string | null,
+      "created_at": string | null
+      }
+        Update: {
+      "id": string | null,
+      "name": string | null,
+      "name_normalized": string | null,
+      "name_en": string | null,
+      "sort_order": number | null,
+      "created_by": string | null,
+      "created_at": string | null
+      }
+        Relationships: []
+      }
     }
     Views: {
       "v_balance_sheet": {
@@ -6008,6 +6374,64 @@ export type Database = {
       "warehouse_name": string | null,
       "shipment_count": number | null,
       "last_sync_at": string | null
+      }
+      }
+      "salespersons_odoo": {
+        Row: {
+      "user_id": number | null,
+      "salesperson_name": string | null,
+      "company_id": number | null,
+      "customer_count": number | null
+      }
+      }
+      "sales_orders_odoo18_geo": {
+        Row: {
+      "order_id": number | null,
+      "order_name": string | null,
+      "order_date": string | null,
+      "order_date_cairo": string | null,
+      "order_month": string | null,
+      "company_id": number | null,
+      "company_name": string | null,
+      "customer_id": number | null,
+      "customer_name": string | null,
+      "salesperson": string | null,
+      "warehouse_id": number | null,
+      "warehouse_name": string | null,
+      "lines_count": number | null,
+      "products_count": number | null,
+      "total_qty": number | null,
+      "order_value": number | null,
+      "source_updated_at": string | null,
+      "governorate_code": string | null,
+      "governorate_name_ar": string | null,
+      "area_code": string | null,
+      "area_name_ar": string | null,
+      "geography_source": string | null,
+      "geography_confidence": number | null,
+      "geography_needs_review": boolean | null
+      }
+      }
+      "product_sales_from_june1": {
+        Row: {
+      "odoo_line_id": number | null,
+      "order_id": number | null,
+      "order_name": string | null,
+      "order_date": string | null,
+      "customer_id": number | null,
+      "customer_name": string | null,
+      "salesperson": string | null,
+      "product_id": number | null,
+      "product_name": string | null,
+      "product_category": string | null,
+      "company_id": number | null,
+      "company_name": string | null,
+      "warehouse_id": number | null,
+      "warehouse_name": string | null,
+      "qty_sold": number | null,
+      "subtotal": number | null,
+      "state": string | null,
+      "updated_at": string | null
       }
       }
     }
@@ -6864,7 +7288,23 @@ export type Database = {
         Args: any
         Returns: any
       }
+      "analytics_filter_companies": {
+        Args: any
+        Returns: any
+      }
       "reverse_journal_entry": {
+        Args: any
+        Returns: any
+      }
+      "dblink_open": {
+        Args: any
+        Returns: any
+      }
+      "dblink_open": {
+        Args: any
+        Returns: any
+      }
+      "dblink_open": {
         Args: any
         Returns: any
       }
@@ -6876,11 +7316,119 @@ export type Database = {
         Args: any
         Returns: any
       }
+      "dblink_disconnect": {
+        Args: any
+        Returns: any
+      }
+      "dblink_open": {
+        Args: any
+        Returns: any
+      }
+      "dblink_fetch": {
+        Args: any
+        Returns: any
+      }
+      "dblink_fetch": {
+        Args: any
+        Returns: any
+      }
+      "dblink_fetch": {
+        Args: any
+        Returns: any
+      }
+      "dblink_fetch": {
+        Args: any
+        Returns: any
+      }
+      "dblink_close": {
+        Args: any
+        Returns: any
+      }
+      "dblink_close": {
+        Args: any
+        Returns: any
+      }
+      "dblink_close": {
+        Args: any
+        Returns: any
+      }
+      "dblink_close": {
+        Args: any
+        Returns: any
+      }
+      "dblink": {
+        Args: any
+        Returns: any
+      }
+      "dblink": {
+        Args: any
+        Returns: any
+      }
+      "dblink": {
+        Args: any
+        Returns: any
+      }
       "admin_assign_shipment_to_plan": {
         Args: any
         Returns: any
       }
       "admin_close_delivery_plan": {
+        Args: any
+        Returns: any
+      }
+      "dblink": {
+        Args: any
+        Returns: any
+      }
+      "dblink_exec": {
+        Args: any
+        Returns: any
+      }
+      "dblink_exec": {
+        Args: any
+        Returns: any
+      }
+      "dblink_exec": {
+        Args: any
+        Returns: any
+      }
+      "dblink_exec": {
+        Args: any
+        Returns: any
+      }
+      "dblink_get_pkey": {
+        Args: any
+        Returns: any
+      }
+      "dblink_build_sql_insert": {
+        Args: any
+        Returns: any
+      }
+      "dblink_build_sql_delete": {
+        Args: any
+        Returns: any
+      }
+      "dblink_build_sql_update": {
+        Args: any
+        Returns: any
+      }
+      "dblink_current_query": {
+        Args: any
+        Returns: any
+      }
+      "dblink_send_query": {
+        Args: any
+        Returns: any
+      }
+      "dblink_is_busy": {
+        Args: any
+        Returns: any
+      }
+      "dblink_get_result": {
+        Args: any
+        Returns: any
+      }
+      "dblink_get_result": {
         Args: any
         Returns: any
       }
@@ -6900,6 +7448,26 @@ export type Database = {
         Args: any
         Returns: any
       }
+      "dblink_get_connections": {
+        Args: any
+        Returns: any
+      }
+      "dblink_cancel_query": {
+        Args: any
+        Returns: any
+      }
+      "dblink_error_message": {
+        Args: any
+        Returns: any
+      }
+      "dblink_get_notify": {
+        Args: any
+        Returns: any
+      }
+      "dblink_get_notify": {
+        Args: any
+        Returns: any
+      }
       "driver_complete_route_tracking": {
         Args: any
         Returns: any
@@ -6913,6 +7481,14 @@ export type Database = {
         Returns: any
       }
       "driver_submit_collection_check": {
+        Args: any
+        Returns: any
+      }
+      "dblink_fdw_validator": {
+        Args: any
+        Returns: any
+      }
+      "dblink_connect_u": {
         Args: any
         Returns: any
       }
@@ -6933,6 +7509,10 @@ export type Database = {
         Returns: any
       }
       "post_journal_entry": {
+        Args: any
+        Returns: any
+      }
+      "dblink_connect_u": {
         Args: any
         Returns: any
       }
@@ -7020,6 +7600,210 @@ export type Database = {
         Args: any
         Returns: any
       }
+      "dblink_connect": {
+        Args: any
+        Returns: any
+      }
+      "dblink_connect": {
+        Args: any
+        Returns: any
+      }
+      "analytics_customer_action_center_scoped_v2": {
+        Args: any
+        Returns: any
+      }
+      "dblink_disconnect": {
+        Args: any
+        Returns: any
+      }
+      "analytics_customer_orders_v2": {
+        Args: any
+        Returns: any
+      }
+      "analytics_customer_product_dropoff_v2": {
+        Args: any
+        Returns: any
+      }
+      "analytics_customer_favorite_products_v2": {
+        Args: any
+        Returns: any
+      }
+      "analytics_product_top_customers_v2": {
+        Args: any
+        Returns: any
+      }
+      "analytics_customer_retention_details_v2": {
+        Args: any
+        Returns: any
+      }
+      "analytics_sales_rep_trend": {
+        Args: any
+        Returns: any
+      }
+      "analytics_sales_rep_customers": {
+        Args: any
+        Returns: any
+      }
+      "analytics_sales_rep_retention_details": {
+        Args: any
+        Returns: any
+      }
+      "analytics_sales_rep_daily_summary": {
+        Args: any
+        Returns: any
+      }
+      "analytics_sales_rep_daily_kpis": {
+        Args: any
+        Returns: any
+      }
+      "analytics_sales_rep_action_summary": {
+        Args: any
+        Returns: any
+      }
+      "analytics_sales_rep_recovery_pipeline": {
+        Args: any
+        Returns: any
+      }
+      "analytics_sales_rep_customer_priorities": {
+        Args: any
+        Returns: any
+      }
+      "analytics_customer_action_center": {
+        Args: any
+        Returns: any
+      }
+      "analytics_sales_rep_daily_actions": {
+        Args: any
+        Returns: any
+      }
+      "analytics_customer_summary_v2": {
+        Args: any
+        Returns: any
+      }
+      "analytics_customer_retention_summary": {
+        Args: any
+        Returns: any
+      }
+      "analytics_sales_rep_summary": {
+        Args: any
+        Returns: any
+      }
+      "analytics_sales_executive_kpis_v2": {
+        Args: any
+        Returns: any
+      }
+      "analytics_sales_daily_summary_v2": {
+        Args: any
+        Returns: any
+      }
+      "analytics_product_summary_v2": {
+        Args: any
+        Returns: any
+      }
+      "analytics_filter_salespeople": {
+        Args: any
+        Returns: any
+      }
+      "analytics_filter_customers_v2": {
+        Args: any
+        Returns: any
+      }
+      "analytics_filter_products_v2": {
+        Args: any
+        Returns: any
+      }
+      "analytics_filter_customer_statuses": {
+        Args: any
+        Returns: any
+      }
+      "analytics_filter_governorates": {
+        Args: any
+        Returns: any
+      }
+      "analytics_filter_areas": {
+        Args: any
+        Returns: any
+      }
+      "analytics_top_customers_v2": {
+        Args: any
+        Returns: any
+      }
+      "analytics_procurement_kpis": {
+        Args: any
+        Returns: any
+      }
+      "analytics_procurement_suppliers": {
+        Args: any
+        Returns: any
+      }
+      "analytics_procurement_reorder_suggestions": {
+        Args: any
+        Returns: any
+      }
+      "analytics_procurement_stock_by_category": {
+        Args: any
+        Returns: any
+      }
+      "set_ticket_items_updated_at": {
+        Args: any
+        Returns: any
+      }
+      "search_tickets": {
+        Args: any
+        Returns: any
+      }
+      "admin_confirm_delivery": {
+        Args: any
+        Returns: any
+      }
+      "cleanup_location_tracking": {
+        Args: any
+        Returns: any
+      }
+      "count_plan_shipments": {
+        Args: any
+        Returns: any
+      }
+      "search_all_customers": {
+        Args: any
+        Returns: any
+      }
+      "coding_assert_owner": {
+        Args: any
+        Returns: any
+      }
+      "coding_next_code_for": {
+        Args: any
+        Returns: any
+      }
+      "coding_upsert_product": {
+        Args: any
+        Returns: any
+      }
+      "coding_delete_product": {
+        Args: any
+        Returns: any
+      }
+      "coding_apply_batch": {
+        Args: any
+        Returns: any
+      }
+      "add_main_category": {
+        Args: any
+        Returns: any
+      }
+      "coding_upsert_product": {
+        Args: any
+        Returns: any
+      }
+      "add_product_brand": {
+        Args: any
+        Returns: any
+      }
+      "add_sub_category": {
+        Args: any
+        Returns: any
+      }
     }
     Enums: {
       "app_role": "admin" | "manager" | "supervisor" | "sales_agent" | "telesales" | "driver" | "dispatcher" | "spv"
@@ -7038,6 +7822,10 @@ export type Database = {
       "visit_mode": "gps" | "manual"
     }
     CompositeTypes: {
+      "dblink_pkey_results": {
+      "position": string
+      "colname": string
+      }
     }
   }
 }

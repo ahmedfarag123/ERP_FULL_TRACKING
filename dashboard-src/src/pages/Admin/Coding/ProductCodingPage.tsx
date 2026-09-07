@@ -28,6 +28,7 @@ import {
   suggestCounterpart,
   buildEnglishName,
   translateViaGoogle,
+  englishSizeUnit,
   SIZE_UNITS,
   computeNextCode,
   getCodePrefix,
@@ -588,12 +589,13 @@ function EntryTab(props: {
         if (cancelled) return;
         setTranslationLoading(false);
         if (res && (res.brand || res.product)) {
+          const brandFallback = brandSelected?.name_en || res.brand || "";
           setLiveTranslated(
             buildEnglishName({
-              brand: res.brand,
-              product: res.product,
+              brand: brandFallback,
+              product: res.product || "",
               size_amount: sizeAmount,
-              size_unit: sizeUnit,
+              size_unit: englishSizeUnit(sizeUnit),
               pack_qty: packQty,
             })
           );

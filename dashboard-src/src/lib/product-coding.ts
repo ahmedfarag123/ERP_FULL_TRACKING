@@ -41,6 +41,15 @@ export async function translateViaGoogle(input: {
 const ARABIC_PATTERN = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/;
 const LATIN_PATTERN = /[a-zA-Z]+/;
 
+const AR_TO_EN_UNIT: Record<string, string> = {
+  "كجم": "kg", "جم": "g", "لتر": "L", "مل": "ml",
+  "قطعه": "pc", "قطعة": "pc", "عبوه": "Pack", "عبوات": "Pack", "جرام": "g",
+};
+
+export function englishSizeUnit(unit: string): string {
+  return AR_TO_EN_UNIT[unit] ?? unit;
+}
+
 const AR2LAT: Record<string, string> = {
   "ا": "a", "أ": "a", "إ": "a", "آ": "a",
   "ب": "b", "ت": "t", "ث": "th", "ج": "j",
@@ -130,10 +139,7 @@ export function suggestCounterpart(
     if (!s) return "";
     return lat ? (LATIN_PATTERN.test(s) ? s : "") : (ARABIC_PATTERN.test(s) ? s : "");
   };
-  const sizeUnitEn = {
-    "كجم": "kg", "جم": "g", "لتر": "L", "مل": "ml",
-    "قطعه": "pc", "عبوه": "Pack",
-  }[sizeUnit];
+  const sizeUnitEn = englishSizeUnit(sizeUnit);
   return {
     brand: safe(brandEn, true),
     product: safe(productEn, true),

@@ -24,6 +24,8 @@
     "import:visits": "node supabase/scripts/import-visits-from-sheet.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
+    "deploy:full": "npm run build:all && node scripts/deploy-all.mjs",
+    "deploy:admin": "npm run build:admin && node scripts/deploy-admin-only.mjs",
     "preview:sales": "vite preview --config vite.config.sales.ts",
     "preview:driver": "npm --workspace @horecasmart/driver run preview -- --host",
     "check:pwa": "node scripts/pwa-readiness-check.mjs",

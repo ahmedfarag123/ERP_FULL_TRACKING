@@ -180,7 +180,7 @@ export default function LiveTrackingMapSection({
       description={`مواقع السائقين والخطط النشطة، تتحدث كل ${Math.round(refetchInterval / 1000)} ثوانٍ`}
     >
       {isLoading ? (
-        <div className="h-[540px] animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800/60" />
+        <div className="h-[88vh] md:h-[540px] animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800/60" />
       ) : (
         <AdminLiveTrackingMap
           drivers={data?.drivers ?? []}

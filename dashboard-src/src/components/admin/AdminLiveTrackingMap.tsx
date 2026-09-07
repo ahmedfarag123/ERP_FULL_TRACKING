@@ -444,7 +444,7 @@ function DriverCard({
   return (
     <button
       onClick={onSelect}
-      className={`w-full text-right rounded-xl transition-all duration-200 group relative ${
+      className={`w-full md:w-auto shrink-0 md:shrink min-w-[240px] md:min-w-0 max-w-[85vw] md:max-w-none text-right rounded-xl transition-all duration-200 group relative ${
         isSelected ? "shadow-md" : "hover:shadow-sm"
       }`}
       style={{
@@ -682,14 +682,14 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
   return (
     <div
       ref={mapRef}
-      className={`relative overflow-hidden rounded-2xl border border-gray-200/80 dark:border-gray-700/80 flex shadow-lg ${fullscreen ? "fixed inset-0 z-[9999] h-screen w-screen rounded-none border-0" : "h-[540px]"}`}
+      className={`relative overflow-hidden rounded-2xl border border-gray-200/80 dark:border-gray-700/80 flex flex-col md:flex-row shadow-lg ${fullscreen ? "fixed inset-0 z-[9999] h-screen w-screen rounded-none border-0" : "h-[88vh] md:h-[540px]"}`}
     >
       {/* Sidebar */}
-      <div className="w-72 flex-shrink-0 overflow-y-auto border-r border-gray-200/80 bg-white dark:border-gray-700/80 dark:bg-gray-900 flex flex-col">
+      <div className="md:w-72 md:flex-shrink-0 md:overflow-y-auto md:border-r border-b md:border-b-0 border-gray-200/80 bg-white dark:border-gray-700/80 dark:bg-gray-900 flex flex-col">
         {/* Header */}
-        <div className="px-4 pt-4 pb-3 border-b border-gray-100 dark:border-gray-800">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-white" style={{ fontFamily: "sans-serif" }}>
+        <div className="px-3 py-2 md:px-4 md:pt-4 md:pb-3 border-b border-gray-100 dark:border-gray-800">
+          <div className="flex items-center justify-between mb-1 md:mb-2">
+            <h3 className="text-[13px] md:text-sm font-bold text-gray-900 dark:text-white" style={{ fontFamily: "sans-serif" }}>
               السائقون
             </h3>
             <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 bg-brand-25 dark:bg-white/[0.02] px-2 py-0.5 rounded-full" style={{ fontFamily: "sans-serif" }}>
@@ -706,7 +706,7 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
         </div>
 
         {/* Driver Cards */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        <div className="flex md:flex-col flex-1 md:flex-none overflow-x-auto md:overflow-y-auto p-2 gap-1 md:space-y-1">
           {driversWithPlans.map((dp) => {
             const idx = driverIndexMap.get(dp.driverId) ?? 0;
             const color = driverColor(idx);
@@ -725,7 +725,7 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
         </div>
 
         {/* Toggle */}
-        <div className="p-3 border-t border-gray-100 dark:border-gray-800">
+        <div className="p-2 md:p-3 border-t border-gray-100 dark:border-gray-800">
           <div className="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-white/[0.04]">
             <button
               onClick={() => setSelectedDriverId(null)}

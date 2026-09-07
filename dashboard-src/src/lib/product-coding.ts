@@ -554,3 +554,78 @@ export function validateEntryField(
   if (!s) return `${label} مطلوب`;
   return null;
 }
+
+export type ProductContentValidation = {
+  valid: boolean;
+  reason?: string;
+  cleaned?: string;
+};
+
+export function validateProductContent(input: string): ProductContentValidation {
+  const raw = input ?? "";
+  const cleaned = raw
+    .replace(/[\u064B-\u0652\u0640]/g, "")
+    .replace(/[\u200C\u200D\u00A0]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned) {
+    return { valid: false, reason: "أدخل اسم المنتج", cleaned };
+  }
+
+  if (/^[\d.,:\-*/+\s]*$/.test(cleaned)) {
+    return { valid: false, reason: "قيمة غير مفهومة — أدخل اسم منتج وليس رقمًا أو رمزًا", cleaned };
+  }
+
+  const hasValuable = /[^\d.,:\-*/+#%&@()[\]]/.test(cleaned);
+  if (!hasValuable) {
+    return { valid: false, reason: "قيمة غير مفهومة — أدخل اسم منتج حقيقي", cleaned };
+  }
+
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  let meaningfulWords = 0;
+  for (const w of words) {
+    const letters = w.replace(/[^\p{L}\p{N}]/gu, "");
+    if (letters.length >= 2) meaningfulWords++;
+  }
+  if (meaningfulWords === 0) {
+    return { valid: false, reason: "قيمة غير مفهومة — الكلمات غير صحيحة", cleaned };
+  }
+
+  const isArabicChar = (ch: string) => /[\u0600-\u06FF]/.test(ch);
+  const gibberishWord = (w: string): boolean => {
+    const letters = w.replace(/[^\p{L}]/gu, "");
+    if (letters.length < 3) return false;
+    const arLetters = [...letters].filter(isArabicChar);
+    if (arLetters.length >= 2 && arLetters.length >= letters.length * 0.6) {
+      const distinct = new Set(arLetters.map((c) => c.normalize("NFKC"))).size;
+      if (distinct <= 1) return true;
+      const arVowels = [...arLetters].filter((c) => /[اويىءة]/.test(c)).length;
+      if (arVowels === 0 && distinct < 3) return true;
+      if (/ه{2,}|ا{2,}|ي{2,}/.test(arLetters.join(""))) return true;
+      return false;
+    }
+    const latLetters = [...letters].filter((c) => !isArabicChar(c));
+    if (latLetters.length < 2) return false;
+    const latText = latLetters.join("").toLowerCase();
+    let vowels = 0;
+    for (const ch of latLetters) {
+      if (/[aeiouAEIOU]/.test(ch)) vowels++;
+    }
+    const hasDigits = /\d/.test(w);
+    if (vowels === 0 && !hasDigits) return true;
+    if (vowels === 0) return new Set(latText).size <= 2;
+    return false;
+  };
+
+  const gibberish = words.filter(gibberishWord);
+  if (gibberish.length > 0) {
+    return {
+      valid: false,
+      reason: `كلمة غير مفهومة: «${gibberish[0]}»`,
+      cleaned,
+    };
+  }
+
+  return { valid: true, cleaned };
+}

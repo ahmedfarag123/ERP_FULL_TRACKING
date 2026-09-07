@@ -30,6 +30,7 @@ import {
   buildEnglishName,
   translateViaGoogle,
   englishSizeUnit,
+  validateProductContent,
   SIZE_UNITS,
   computeNextCode,
   getCodePrefix,
@@ -688,6 +689,7 @@ function EntryTab(props: {
   const [cost, setCost] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [contentError, setContentError] = useState<string | null>(null);
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
   const [extra, setExtra] = useState<ExtraState>(EMPTY_EXTRA);
   const [openGroups, setOpenGroups] = useState<Record<number, boolean>>({
@@ -719,6 +721,11 @@ function EntryTab(props: {
     pack_qty: packQty,
   };
   const built = buildProductName(parts);
+  const builtClean = useMemo(() => {
+    const check = validateProductContent(product);
+    if (!check.valid) return built;
+    return buildProductName({ ...parts, product: check.cleaned ?? product });
+  }, [built, parts, product]);
   const suggested = useMemo(() => {
     const brandName = brandSelected?.name ?? brandQuery.trim();
     if (!brandName && !product.trim()) return null;
@@ -835,6 +842,7 @@ function EntryTab(props: {
     setPackQty("");
     setLiveTranslated(null);
     setTranslationLoading(false);
+    setContentError(null);
     setExtra(EMPTY_EXTRA);
   };
 
@@ -917,6 +925,14 @@ function EntryTab(props: {
     if (!selectedTree) return setError("القسم/الفرع غير موجود في الشجرة");
     if (!product.trim() && !sizeAmount.trim()) return setError("أدخل اسم المنتج أو المحتوى بعد البراند");
 
+    const contentCheck = validateProductContent(product);
+    const normalizedProduct = contentCheck.cleaned ?? product.trim();
+    if (!contentCheck.valid) {
+      setContentError(contentCheck.reason ?? "قيمة غير مفهومة");
+      return;
+    }
+    setContentError(null);
+
     const prefix = getCodePrefix(selectedTree);
     let code = "";
     if (manualCode) {
@@ -943,13 +959,13 @@ function EntryTab(props: {
     };
 
     props.onSubmit({
-      original_name: built.original_name,
+      original_name: builtClean.original_name,
       main_category: main,
       sub_category: sub,
       new_code: manualCode ? code : undefined,
       old_code: oldCode.trim() || null,
       external_product_id: externalId.trim() || null,
-      normalized_name: built.normalized_name,
+      normalized_name: builtClean.normalized_name,
       english_name: englishName.trim(),
       sale_price: price,
       cost: costV,
@@ -1051,9 +1067,20 @@ function EntryTab(props: {
         <AdminField label="المنتج / المحتوى" helper="مثال: سيرب فراولة، بطاطس مقلي، طماطم مصفاة">
           <input
             value={product}
-            onChange={(e) => setProduct(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+            onChange={(e) => {
+              setProduct(e.target.value);
+              if (contentError) setContentError(null);
+            }}
+            className={`w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white ${
+              contentError ? "border-red-400 focus:border-red-400 focus:ring-red-400 dark:border-red-500" : ""
+            }`}
           />
+          {contentError ? (
+            <p className="mt-1 flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400">
+              <span>⚠</span>
+              <span>{contentError}</span>
+            </p>
+          ) : null}
         </AdminField>
 
         <AdminField label="القسم الرئيسي">

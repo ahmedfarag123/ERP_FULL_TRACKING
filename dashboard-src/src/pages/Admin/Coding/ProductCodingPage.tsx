@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import PageMeta from "../../../components/common/PageMeta";
 import { KNOWN_BRANDS, KNOWN_PRODUCTS } from "../../../data/coding-known";
@@ -47,6 +48,183 @@ const STATUS_BADGE: Record<string, string> = {
   valid: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20",
   warning: "bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/20",
 };
+
+type ExtraState = {
+  barcode: string;
+  hs_code: string;
+  product_type: string;
+  track_method: string;
+  is_storable: boolean;
+  sale_ok: boolean;
+  purchase_ok: boolean;
+  weight: string;
+  volume: string;
+  uom_sale: string;
+  uom_purchase: string;
+  country_of_origin: string;
+  use_expiration: boolean;
+  expiry_days: string;
+  best_before_days: string;
+  tags: string;
+  taxes_sale: string;
+  taxes_purchase: string;
+  note: string;
+  description_sale: string;
+  description_purchase: string;
+  sale_delay: string;
+  purchase_method: string;
+  invoice_policy: string;
+  alert_time: string;
+  removal_time: string;
+  reordering_min_qty: string;
+  reordering_max_qty: string;
+  warehouse: string;
+  location: string;
+};
+
+const EMPTY_EXTRA: ExtraState = {
+  barcode: "",
+  hs_code: "",
+  product_type: "",
+  track_method: "",
+  is_storable: false,
+  sale_ok: true,
+  purchase_ok: true,
+  weight: "",
+  volume: "",
+  uom_sale: "",
+  uom_purchase: "",
+  country_of_origin: "",
+  use_expiration: false,
+  expiry_days: "",
+  best_before_days: "",
+  tags: "",
+  taxes_sale: "",
+  taxes_purchase: "",
+  note: "",
+  description_sale: "",
+  description_purchase: "",
+  sale_delay: "",
+  purchase_method: "",
+  invoice_policy: "",
+  alert_time: "",
+  removal_time: "",
+  reordering_min_qty: "",
+  reordering_max_qty: "",
+  warehouse: "",
+  location: "",
+};
+
+type ExtraFieldDef = {
+  key: keyof ExtraState;
+  label: string;
+  kind: "text" | "number" | "bool" | "select" | "textarea";
+  options?: { value: string; label: string }[];
+  dir?: "ltr";
+  helper?: string;
+};
+
+const EXTRA_GROUP_DEFS: { title: string; fields: ExtraFieldDef[] }[] = [
+  {
+    title: "هوية المنتج",
+    fields: [
+      { key: "barcode", label: "الباركود (Barcode)", kind: "text", dir: "ltr", helper: "مثال: 6221050195887" },
+      { key: "hs_code", label: "كود HS الجمركي", kind: "text", dir: "ltr", helper: "مثال: 040690" },
+      {
+        key: "product_type", label: "نوع المنتج", kind: "select", options: [
+          { value: "product", label: "منتج (للتخزين)" },
+          { value: "consu", label: "مستهلك (لا يُخزّن)" },
+          { value: "service", label: "خدمة" },
+        ],
+      },
+      {
+        key: "track_method", label: "طريقة التتبع", kind: "select", options: [
+          { value: "none", label: "بدون تتبع" },
+          { value: "lot", label: "دفعات (Lot)" },
+          { value: "serial", label: "أرقام تسلسلية (Serial)" },
+        ],
+      },
+      { key: "country_of_origin", label: "بلد المنشأ", kind: "text" },
+      { key: "tags", label: "الوسوم (Tags)", kind: "text", helper: "تُفصل بفواصل: chill:0,chill:1,halal" },
+      { key: "warehouse", label: "المستودع", kind: "text", helper: "مثال: Warehouse 1" },
+      { key: "location", label: "الموقع", kind: "text", helper: "مثال: A-01-02" },
+    ],
+  },
+  {
+    title: "المبيعات والشراء",
+    fields: [
+      { key: "sale_ok", label: "متاح للبيع", kind: "bool" },
+      { key: "purchase_ok", label: "متاح للشراء", kind: "bool" },
+      { key: "uom_sale", label: "وحدة البيع", kind: "text", dir: "ltr", helper: "مثال: kg, unit, box" },
+      { key: "uom_purchase", label: "وحدة الشراء", kind: "text", dir: "ltr" },
+      { key: "taxes_sale", label: "ضرائب البيع", kind: "text", dir: "ltr", helper: "أكواد مفصولة بفواصل" },
+      { key: "taxes_purchase", label: "ضرائب الشراء", kind: "text", dir: "ltr" },
+      { key: "sale_delay", label: "مهلة التسليم (أيام)", kind: "number", dir: "ltr" },
+      {
+        key: "purchase_method", label: "طريقة الشراء", kind: "select", options: [
+          { value: "purchase", label: "شراء / تصنيع" },
+          { value: "receive", label: "استلام فقط (Receive in Advance)" },
+        ],
+      },
+      {
+        key: "invoice_policy", label: "سياسة الفوترة", kind: "select", options: [
+          { value: "order", label: "عند الطلب (Order)" },
+          { value: "delivery", label: "عند التسليم (Delivery)" },
+        ],
+      },
+    ],
+  },
+  {
+    title: "المخزون والصلاحية",
+    fields: [
+      { key: "is_storable", label: "منتج مخزني", kind: "bool" },
+      { key: "use_expiration", label: "تفعيل تاريخ الانتهاء", kind: "bool" },
+      { key: "weight", label: "الوزن (كجم)", kind: "number", dir: "ltr" },
+      { key: "volume", label: "الحجم (م³)", kind: "number", dir: "ltr" },
+      { key: "expiry_days", label: "أيام حتى الانتهاء (Expiry)", kind: "number", dir: "ltr" },
+      { key: "best_before_days", label: "أيام أفضل قبل (Best Before)", kind: "number", dir: "ltr" },
+      { key: "alert_time", label: "مهلة التنبيه قبل الانتهاء (أيام)", kind: "number", dir: "ltr" },
+      { key: "removal_time", label: "مهلة الإزالة بعد الانتهاء (أيام)", kind: "number", dir: "ltr" },
+      { key: "reordering_min_qty", label: "كمية إعادة الطلب (حد أدنى)", kind: "number", dir: "ltr" },
+      { key: "reordering_max_qty", label: "كمية إعادة الطلب (حد أقصى)", kind: "number", dir: "ltr" },
+    ],
+  },
+  {
+    title: "الأوصاف والملاحظات",
+    fields: [
+      { key: "note", label: "ملاحظات عامة", kind: "textarea" },
+      { key: "description_sale", label: "وصف البيع", kind: "textarea" },
+      { key: "description_purchase", label: "وصف الشراء", kind: "textarea" },
+    ],
+  },
+];
+
+function CollapsibleGroup(props: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+      <button
+        type="button"
+        onClick={props.onToggle}
+        className={`flex w-full items-center justify-between px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-brand-25 dark:text-gray-100 dark:hover:bg-gray-800 ${props.open ? "border-b border-gray-200 dark:border-gray-700" : ""}`}
+      >
+        <span>{props.title}</span>
+        {props.open ? (
+          <ChevronUp className="h-4 w-4 text-gray-400" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-gray-400" />
+        )}
+      </button>
+      {props.open ? (
+        <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-2">{props.children}</div>
+      ) : null}
+    </div>
+  );
+}
 
 export default function ProductCodingPage() {
   const queryClient = useQueryClient();
@@ -144,7 +322,7 @@ export default function ProductCodingPage() {
     if (!q) return products;
     const like = q.toLowerCase();
     return products.filter((p) =>
-      [p.new_code, p.old_code ?? "", p.original_name, p.normalized_name, p.english_name, p.main_category, p.sub_category, p.external_product_id ?? ""]
+      [p.new_code, p.old_code ?? "", p.barcode ?? "", p.hs_code ?? "", p.tags ?? "", p.original_name, p.normalized_name, p.english_name, p.main_category, p.sub_category, p.external_product_id ?? ""]
         .some((v) => v.toLowerCase().includes(like))
     );
   }, [products, search]);
@@ -519,6 +697,16 @@ function EntryTab(props: {
   const [isActive, setIsActive] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
+  const [extra, setExtra] = useState<ExtraState>(EMPTY_EXTRA);
+  const [openGroups, setOpenGroups] = useState<Record<number, boolean>>({
+    0: true,
+    1: false,
+    2: false,
+    3: false,
+  });
+
+  const setField = (key: keyof ExtraState, value: string | boolean) =>
+    setExtra((prev) => ({ ...prev, [key]: value }));
 
   const [brandQuery, setBrandQuery] = useState("");
   const [brandSelected, setBrandSelected] = useState<ProductBrand | null>(null);
@@ -656,6 +844,7 @@ function EntryTab(props: {
     setPackQty("");
     setLiveTranslated(null);
     setTranslationLoading(false);
+    setExtra(EMPTY_EXTRA);
   };
 
   if (props.editing && hydratedFor !== props.editing.new_code) {
@@ -694,6 +883,38 @@ function EntryTab(props: {
     setNewCode(e.new_code);
     setError(null);
     setHydratedFor(e.new_code);
+    setExtra({
+      barcode: e.barcode ?? "",
+      hs_code: e.hs_code ?? "",
+      product_type: e.product_type ?? "",
+      track_method: e.track_method ?? "",
+      is_storable: e.is_storable ?? false,
+      sale_ok: e.sale_ok ?? true,
+      purchase_ok: e.purchase_ok ?? true,
+      weight: e.weight != null ? String(e.weight) : "",
+      volume: e.volume != null ? String(e.volume) : "",
+      uom_sale: e.uom_sale ?? "",
+      uom_purchase: e.uom_purchase ?? "",
+      country_of_origin: e.country_of_origin ?? "",
+      use_expiration: e.use_expiration ?? false,
+      expiry_days: e.expiry_days != null ? String(e.expiry_days) : "",
+      best_before_days: e.best_before_days != null ? String(e.best_before_days) : "",
+      tags: e.tags ?? "",
+      taxes_sale: e.taxes_sale ?? "",
+      taxes_purchase: e.taxes_purchase ?? "",
+      note: e.note ?? "",
+      description_sale: e.description_sale ?? "",
+      description_purchase: e.description_purchase ?? "",
+      sale_delay: e.sale_delay != null ? String(e.sale_delay) : "",
+      purchase_method: e.purchase_method ?? "",
+      invoice_policy: e.invoice_policy ?? "",
+      alert_time: e.alert_time != null ? String(e.alert_time) : "",
+      removal_time: e.removal_time != null ? String(e.removal_time) : "",
+      reordering_min_qty: e.reordering_min_qty != null ? String(e.reordering_min_qty) : "",
+      reordering_max_qty: e.reordering_max_qty != null ? String(e.reordering_max_qty) : "",
+      warehouse: e.warehouse ?? "",
+      location: e.location ?? "",
+    });
   }
 
   const handleSubmit = () => {
@@ -719,6 +940,17 @@ function EntryTab(props: {
     if (!Number.isFinite(price) || price < 0) return setError("سعر البيع غير صحيح");
     if (!Number.isFinite(costV) || costV < 0) return setError("التكلفة غير صحيحة");
 
+    const numOrNull = (s: string): number | null => {
+      const t = s.trim();
+      if (!t) return null;
+      const n = Number(t);
+      return Number.isFinite(n) ? n : null;
+    };
+    const strOrNull = (s: string): string | null => {
+      const t = s.trim();
+      return t ? t : null;
+    };
+
     props.onSubmit({
       original_name: built.original_name,
       main_category: main,
@@ -733,6 +965,36 @@ function EntryTab(props: {
       is_active: isActive,
       brand: brandName,
       brand_normalized: normalizeArName(brandName),
+      barcode: strOrNull(extra.barcode),
+      hs_code: strOrNull(extra.hs_code),
+      product_type: strOrNull(extra.product_type as string),
+      track_method: strOrNull(extra.track_method as string),
+      is_storable: extra.is_storable,
+      sale_ok: extra.sale_ok,
+      purchase_ok: extra.purchase_ok,
+      weight: numOrNull(extra.weight as string),
+      volume: numOrNull(extra.volume as string),
+      uom_sale: strOrNull(extra.uom_sale as string),
+      uom_purchase: strOrNull(extra.uom_purchase as string),
+      country_of_origin: strOrNull(extra.country_of_origin as string),
+      use_expiration: extra.use_expiration,
+      expiry_days: numOrNull(extra.expiry_days as string),
+      best_before_days: numOrNull(extra.best_before_days as string),
+      tags: strOrNull(extra.tags as string),
+      taxes_sale: strOrNull(extra.taxes_sale as string),
+      taxes_purchase: strOrNull(extra.taxes_purchase as string),
+      note: strOrNull(extra.note as string),
+      description_sale: strOrNull(extra.description_sale as string),
+      description_purchase: strOrNull(extra.description_purchase as string),
+      sale_delay: numOrNull(extra.sale_delay as string),
+      purchase_method: strOrNull(extra.purchase_method as string),
+      invoice_policy: strOrNull(extra.invoice_policy as string),
+      alert_time: numOrNull(extra.alert_time as string),
+      removal_time: numOrNull(extra.removal_time as string),
+      reordering_min_qty: numOrNull(extra.reordering_min_qty as string),
+      reordering_max_qty: numOrNull(extra.reordering_max_qty as string),
+      warehouse: strOrNull(extra.warehouse as string),
+      location: strOrNull(extra.location as string),
     });
   };
 
@@ -996,6 +1258,76 @@ function EntryTab(props: {
           />
           المنتج نشط
         </label>
+      </div>
+
+      <div className="mt-6 space-y-3">
+        {EXTRA_GROUP_DEFS.map((group, gi) => (
+          <CollapsibleGroup
+            key={group.title}
+            title={`${group.title} (${group.fields.length})`}
+            open={openGroups[gi]}
+            onToggle={() => setOpenGroups((prev) => ({ ...prev, [gi]: !prev[gi] }))}
+          >
+            {group.fields.map((field) => {
+              const value = extra[field.key];
+              const baseCls =
+                "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white";
+              if (field.kind === "bool") {
+                return (
+                  <label key={field.key} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(value)}
+                      onChange={(e) => setField(field.key, e.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    <span>{field.label}</span>
+                  </label>
+                );
+              }
+              if (field.kind === "select") {
+                return (
+                  <AdminField key={field.key} label={field.label} helper={field.helper}>
+                    <select
+                      value={String(value)}
+                      onChange={(e) => setField(field.key, e.target.value)}
+                      className={baseCls}
+                    >
+                      <option value="">—</option>
+                      {(field.options ?? []).map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </AdminField>
+                );
+              }
+              if (field.kind === "textarea") {
+                return (
+                  <AdminField key={field.key} label={field.label}>
+                    <textarea
+                      value={String(value)}
+                      onChange={(e) => setField(field.key, e.target.value)}
+                      rows={2}
+                      dir={field.dir ?? "rtl"}
+                      className={`${baseCls} min-h-[60px]`}
+                    />
+                  </AdminField>
+                );
+              }
+              return (
+                <AdminField key={field.key} label={field.label} helper={field.helper}>
+                  <input
+                    value={String(value)}
+                    onChange={(e) => setField(field.key, e.target.value)}
+                    type={field.kind === "number" ? "number" : "text"}
+                    dir={field.dir ?? "rtl"}
+                    className={baseCls}
+                  />
+                </AdminField>
+              );
+            })}
+          </CollapsibleGroup>
+        ))}
       </div>
 
       <div className="mt-6 flex flex-wrap gap-3">

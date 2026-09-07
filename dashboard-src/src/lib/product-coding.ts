@@ -216,6 +216,36 @@ export type ProductCodingRow = {
   source: string;
   brand: string | null;
   brand_normalized: string | null;
+  barcode: string | null;
+  hs_code: string | null;
+  product_type: string | null;
+  track_method: string | null;
+  is_storable: boolean | null;
+  sale_ok: boolean | null;
+  purchase_ok: boolean | null;
+  weight: number | null;
+  volume: number | null;
+  uom_sale: string | null;
+  uom_purchase: string | null;
+  country_of_origin: string | null;
+  use_expiration: boolean | null;
+  expiry_days: number | null;
+  best_before_days: number | null;
+  tags: string | null;
+  taxes_sale: string | null;
+  taxes_purchase: string | null;
+  note: string | null;
+  description_sale: string | null;
+  description_purchase: string | null;
+  sale_delay: number | null;
+  purchase_method: string | null;
+  invoice_policy: string | null;
+  alert_time: number | null;
+  removal_time: number | null;
+  reordering_min_qty: number | null;
+  reordering_max_qty: number | null;
+  warehouse: string | null;
+  location: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -236,6 +266,36 @@ export type UpsertCodingInput = {
   validation_notes?: string;
   brand?: string | null;
   brand_normalized?: string | null;
+  barcode?: string | null;
+  hs_code?: string | null;
+  product_type?: string | null;
+  track_method?: string | null;
+  is_storable?: boolean | null;
+  sale_ok?: boolean | null;
+  purchase_ok?: boolean | null;
+  weight?: number | null;
+  volume?: number | null;
+  uom_sale?: string | null;
+  uom_purchase?: string | null;
+  country_of_origin?: string | null;
+  use_expiration?: boolean | null;
+  expiry_days?: number | null;
+  best_before_days?: number | null;
+  tags?: string | null;
+  taxes_sale?: string | null;
+  taxes_purchase?: string | null;
+  note?: string | null;
+  description_sale?: string | null;
+  description_purchase?: string | null;
+  sale_delay?: number | null;
+  purchase_method?: string | null;
+  invoice_policy?: string | null;
+  alert_time?: number | null;
+  removal_time?: number | null;
+  reordering_min_qty?: number | null;
+  reordering_max_qty?: number | null;
+  warehouse?: string | null;
+  location?: string | null;
 };
 
 export type ProductBrand = {
@@ -375,6 +435,36 @@ export async function upsertCodingProduct(input: UpsertCodingInput): Promise<str
     p_validation_notes: input.validation_notes ?? "",
     p_brand: input.brand ?? null,
     p_brand_normalized: input.brand_normalized ?? null,
+    p_barcode: input.barcode ?? null,
+    p_hs_code: input.hs_code ?? null,
+    p_product_type: input.product_type ?? null,
+    p_track_method: input.track_method ?? null,
+    p_is_storable: input.is_storable ?? null,
+    p_sale_ok: input.sale_ok ?? null,
+    p_purchase_ok: input.purchase_ok ?? null,
+    p_weight: input.weight ?? null,
+    p_volume: input.volume ?? null,
+    p_uom_sale: input.uom_sale ?? null,
+    p_uom_purchase: input.uom_purchase ?? null,
+    p_country_of_origin: input.country_of_origin ?? null,
+    p_use_expiration: input.use_expiration ?? null,
+    p_expiry_days: input.expiry_days ?? null,
+    p_best_before_days: input.best_before_days ?? null,
+    p_tags: input.tags ?? null,
+    p_taxes_sale: input.taxes_sale ?? null,
+    p_taxes_purchase: input.taxes_purchase ?? null,
+    p_note: input.note ?? null,
+    p_description_sale: input.description_sale ?? null,
+    p_description_purchase: input.description_purchase ?? null,
+    p_sale_delay: input.sale_delay ?? null,
+    p_purchase_method: input.purchase_method ?? null,
+    p_invoice_policy: input.invoice_policy ?? null,
+    p_alert_time: input.alert_time ?? null,
+    p_removal_time: input.removal_time ?? null,
+    p_reordering_min_qty: input.reordering_min_qty ?? null,
+    p_reordering_max_qty: input.reordering_max_qty ?? null,
+    p_warehouse: input.warehouse ?? null,
+    p_location: input.location ?? null,
   });
 
   if (error) throw new Error(error.message);

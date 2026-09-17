@@ -82,7 +82,7 @@ function getPreferredVideoConstraints(): MediaTrackConstraints {
     facingMode: { ideal: 'environment' },
     width: { ideal: 1920 },
     height: { ideal: 1080 },
-    frameRate: { ideal: 30, min: 15 },
+    frameRate: { ideal: 30, min: 8 },
     advanced,
   };
 }
@@ -321,7 +321,7 @@ export default function ScannerScreen() {
     try {
       const scanner = new Html5Qrcode(READER_ID, {
         formatsToSupport: ALL_BARCODE_FORMATS,
-        useBarCodeDetectorIfSupported: true,
+        useBarCodeDetectorIfSupported: false,
         verbose: false,
       });
       scannerRef.current = scanner;
@@ -329,7 +329,7 @@ export default function ScannerScreen() {
 
       await scanner.start(
         videoConstraints,
-        { fps: 30, disableFlip: false, videoConstraints },
+        { fps: 15, disableFlip: false, videoConstraints },
         (text) => {
           const code = text.trim();
           if (code && shouldAcceptScan(code)) {

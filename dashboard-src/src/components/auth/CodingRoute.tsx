@@ -1,7 +1,7 @@
 import { Navigate, Outlet, useLocation } from "react-router";
 import { useAuth } from "../../context/AuthContext";
 
-const CODING_EMAILS = ["ahmed-farag@hs.com", "maha-mohamed@hs.com"];
+const CODING_EMAILS = ["ahmed-farag@hs.com", "maha-mohamed@hs.com", "shaimaa@hs.com"];
 
 export default function CodingRoute() {
   const { authUser } = useAuth();

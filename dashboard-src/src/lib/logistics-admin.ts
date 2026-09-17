@@ -50,6 +50,7 @@ export interface LogisticsPlan {
   driverId: string | null;
   driverName: string | null;
   driverProfileId: string | null;
+  coDrivers: PlanAssigneeProfile[];
   district: string | null;
   shipmentCount: number;
   routeDistanceKm: number | null;
@@ -61,6 +62,7 @@ export interface LogisticsPlan {
   preparationStatus: string | null;
   preparationCompletedAt: string | null;
   notExecutedReason: string | null;
+  roundNo: number;
 }
 
 export interface LogisticsShipment {
@@ -191,6 +193,7 @@ const PLAN_SELECT = `
   route_metadata,
   notes,
   not_executed_reason,
+  round_no,
   created_by_profile_id,
   created_at,
   updated_at,
@@ -284,6 +287,7 @@ function mapPlan(row: Record<string, any>, shipmentCounts = new Map<string, numb
     driverId: row.logistics_user_id ?? null,
     driverName: driver?.employee_name ?? null,
     driverProfileId: row.assigned_profile_id ?? driver?.linked_profile_id ?? null,
+    coDrivers: [],
     district: row.district ?? null,
     shipmentCount: shipmentCounts.get(String(row.id)) ?? 0,
     routeDistanceKm: row.route_total_distance_km ?? null,
@@ -295,6 +299,7 @@ function mapPlan(row: Record<string, any>, shipmentCounts = new Map<string, numb
     preparationStatus: preparation?.status ?? null,
     preparationCompletedAt: preparation?.completed_at ?? null,
     notExecutedReason: row.not_executed_reason ?? null,
+    roundNo: asNumber(row.round_no) || 1,
   };
 }
 
@@ -365,6 +370,27 @@ export async function fetchLogisticsShipments(): Promise<LogisticsShipment[]> {
   return rows.slice(0, MAX).map((row) => mapShipment(row));
 }
 
+async function fetchPlanCoDrivers(planIds: string[]): Promise<Map<string, PlanAssigneeProfile[]>> {
+  const result = new Map<string, PlanAssigneeProfile[]>();
+  const uniqueIds = Array.from(new Set(planIds.filter(Boolean)));
+  if (uniqueIds.length === 0) return result;
+  const { data, error } = await supabase
+    .from("logistics_plan_assignees")
+    .select("plan_id, profile_id, display_name")
+    .in("plan_id", uniqueIds);
+  if (error) throw error;
+  for (const row of data ?? []) {
+    const key = String(row.plan_id);
+    const list = result.get(key) ?? [];
+    list.push({
+      profileId: String(row.profile_id),
+      displayName: row.display_name ? String(row.display_name) : null,
+    });
+    result.set(key, list);
+  }
+  return result;
+}
+
 export async function fetchLogisticsPlans(): Promise<LogisticsPlan[]> {
   const counts = await fetchPlanShipmentCounts();
   const { data, error } = await supabase
@@ -374,7 +400,12 @@ export async function fetchLogisticsPlans(): Promise<LogisticsPlan[]> {
     .limit(500);
 
   if (error) throw error;
-  return (data ?? []).map((row) => mapPlan(row as Record<string, any>, counts));
+  const planRows = (data ?? []).map((row) => mapPlan(row as Record<string, any>, counts));
+  const coDrivers = await fetchPlanCoDrivers(planRows.map((plan) => plan.id));
+  for (const plan of planRows) {
+    plan.coDrivers = coDrivers.get(plan.id) ?? [];
+  }
+  return planRows;
 }
 
 async function fetchLogisticsPlanById(planId: string): Promise<LogisticsPlan | null> {
@@ -392,7 +423,9 @@ async function fetchLogisticsPlanById(planId: string): Promise<LogisticsPlan | n
     .eq("plan_id", planId);
   if (countError) throw countError;
 
-  return mapPlan(planRow as Record<string, any>, new Map([[planId, count ?? 0]]));
+  const plan = mapPlan(planRow as Record<string, any>, new Map([[planId, count ?? 0]]));
+  plan.coDrivers = (await fetchPlanCoDrivers([planId])).get(planId) ?? [];
+  return plan;
 }
 
 async function fetchShipmentsForPlan(planId: string): Promise<LogisticsShipment[]> {
@@ -827,13 +860,20 @@ export async function createPlanFromOrders(input: {
   candidates: ShipmentCandidate[];
   notes?: string;
   district?: string;
+  roundNo?: number;
 }) {
   if (input.candidates.length === 0) {
     throw new Error("اختر شحنة واحدة على الأقل.");
   }
 
   const district = input.district?.trim() || derivePlanDistrict(input.candidates);
-  const planId = await createForcedDeliveryPlan(input.driverId, input.plannedDate, input.notes ?? null, district);
+  const planId = await createForcedDeliveryPlan(
+    input.driverId,
+    input.plannedDate,
+    input.notes ?? null,
+    district,
+    input.roundNo && input.roundNo >= 1 ? input.roundNo : 1,
+  );
 
   const scheduledAt = scheduledAtForDate(input.plannedDate);
   const assignedShipments: Array<{ shipmentId: string; orderId: string }> = [];
@@ -874,13 +914,38 @@ export async function createPlanFromOrders(input: {
   return planId as string;
 }
 
-async function createForcedDeliveryPlan(driverId: string, plannedDate: string, notes: string | null, district: string | null = null) {
+export async function createPlanFromExistingShipments(input: {
+  driverId: string;
+  plannedDate: string;
+  shipmentIds: string[];
+  notes?: string;
+  district?: string;
+  roundNo?: number;
+}): Promise<string> {
+  if (input.shipmentIds.length === 0) throw new Error("اختر شحنة واحدة على الأقل.");
+  const planId = await createForcedDeliveryPlan(
+    input.driverId,
+    input.plannedDate,
+    input.notes ?? null,
+    input.district?.trim() || null,
+    input.roundNo && input.roundNo >= 1 ? input.roundNo : 1,
+  );
+  const scheduledAt = scheduledAtForDate(input.plannedDate);
+  const added = await addUnassignedShipmentsToPlan(input.shipmentIds, planId);
+  if (added === 0) {
+    throw new Error("تم إنشاء الخطة لكن لم تُربط أي شحنة بها.");
+  }
+  return planId;
+}
+
+async function createForcedDeliveryPlan(driverId: string, plannedDate: string, notes: string | null, district: string | null = null, roundNo = 1) {
   const { data, error } = await supabase.rpc("admin_create_delivery_plan", {
     p_logistics_user_id: driverId,
     p_planned_date: plannedDate,
     p_notes: notes,
     p_force_new: true,
     p_district: district,
+    p_round_no: roundNo,
   });
 
   if (!error) {
@@ -891,10 +956,10 @@ async function createForcedDeliveryPlan(driverId: string, plannedDate: string, n
   }
 
   if (!isRpcSignatureError(error)) throw error;
-  return insertDeliveryPlanFallback(driverId, plannedDate, notes, district);
+  return insertDeliveryPlanFallback(driverId, plannedDate, notes, district, roundNo);
 }
 
-async function insertDeliveryPlanFallback(driverId: string, plannedDate: string, notes: string | null, district: string | null = null) {
+async function insertDeliveryPlanFallback(driverId: string, plannedDate: string, notes: string | null, district: string | null = null, roundNo = 1) {
   const { data: driver, error: driverError } = await supabase
     .from("logistics_users")
     .select("id, linked_profile_id, status")
@@ -916,6 +981,7 @@ async function insertDeliveryPlanFallback(driverId: string, plannedDate: string,
       plan_status: "pending",
       notes: notes?.trim() ? notes.trim() : null,
       district: district?.trim() ? district.trim() : null,
+      round_no: roundNo >= 1 ? roundNo : 1,
       created_by_profile_id: userResult.user?.id ?? null,
     })
     .select("id")
@@ -1082,6 +1148,33 @@ export async function assignPlanDriver(planId: string, driver: LogisticsDriver, 
   }
 }
 
+export type PlanAssigneeProfile = {
+  profileId: string;
+  displayName: string | null;
+};
+
+/** Read-only viewers the plan is currently shared with. */
+export async function fetchPlanAssignees(planId: string): Promise<PlanAssigneeProfile[]> {
+  const { data, error } = await supabase
+    .from("logistics_plan_assignees")
+    .select("profile_id, display_name")
+    .eq("plan_id", planId);
+  if (error) throw error;
+  return (data ?? []).map((row: any) => ({
+    profileId: String(row.profile_id),
+    displayName: row.display_name ? String(row.display_name) : null,
+  }));
+}
+
+/** Replace the read-only viewer list of a plan (profiles of extra people). */
+export async function setPlanAssignees(planId: string, profileIds: string[]): Promise<void> {
+  const { error } = await supabase.rpc("admin_set_plan_assignees", {
+    p_plan_id: planId,
+    p_profile_ids: profileIds,
+  });
+  if (error) throw error;
+}
+
 export async function updatePlanDate(planId: string, plannedDate: string, shipmentIds: string[]) {
   const scheduledAt = scheduledAtForDate(plannedDate);
   const { error } = await supabase
@@ -1229,6 +1322,15 @@ export async function updatePlanStatus(
   return mapPlan(data as Record<string, any>);
 }
 
+export async function updatePlanRound(planId: string, roundNo: number): Promise<LogisticsPlan> {
+  const { data, error } = await supabase.rpc("admin_set_plan_round", {
+    p_plan_id: planId,
+    p_round_no: roundNo,
+  });
+  if (error) throw error;
+  return mapPlan(data as Record<string, any>);
+}
+
 export async function updateShipmentStatus(
   shipmentId: string,
   newStatus: string,
@@ -1291,3 +1393,407 @@ export const PLAN_STATUS_LABELS: Record<string, string> = {
   cancelled: "ملغاة",
   returned: "تم الاستلام",
 };
+
+export interface AllShipmentRow {
+  id: string;
+  reference: string;
+  customerName: string | null;
+  warehouseName: string | null;
+  shipmentStatus: string | null;
+  planId: string | null;
+  planReference: string | null;
+  planStatus: string | null;
+  driverName: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  deliveryDate: string | null;
+  totalGmv: number | null;
+}
+
+export interface DeliveryDriverDaily {
+  name: string;
+  shipments: number;
+  delivered: number;
+  returned: number;
+  cancelled: number;
+  open: number;
+  successRate: number;
+  codExpected: number;
+  codCollected: number;
+  dueBalance: number;
+  daily: Record<string, number>;
+}
+
+export interface DeliveryShipmentRow {
+  id: string;
+  reference: string;
+  customerName: string | null;
+  status: string;
+  driver: string;
+  date: string;
+  isReturn: boolean;
+  paymentMethod: string | null;
+  cod: number;
+}
+
+export interface DeliveryAnalyticsData {
+  summary: {
+    totalShipments: number;
+    delivered: number;
+    returned: number;
+    cancelled: number;
+    open: number;
+    successRate: number;
+    codExpected: number;
+    codCollected: number;
+    underCollection: number;
+  };
+  days: string[];
+  dailyTrend: { date: string; delivered: number; returned: number; cancelled: number; open: number }[];
+  statusDistribution: { key: string; label: string; value: number }[];
+  paymentMethods: { key: string; label: string; value: number }[];
+  drivers: DeliveryDriverDaily[];
+  shipmentRows: DeliveryShipmentRow[];
+}
+
+async function fetchAllShipmentRows(): Promise<Array<Record<string, any>>> {
+  const MAX = 10000;
+  const PAGE = 1000;
+  const rows: Array<Record<string, any>> = [];
+  let from = 0;
+  while (rows.length < MAX) {
+    const to = from + PAGE - 1;
+    const { data, error } = await supabase
+      .from("logistics_shipments")
+      .select("id, shipment_reference, customer_name, shipment_status, is_return_shipment, plan_id, parent_shipment_id, logistics_user_id, assigned_user_name, completed_at, cancelled_at, scheduled_at, created_at, source")
+      .not("source", "eq", "manual_test")
+      .not("plan_id", "is", null)
+      .order("scheduled_at", { ascending: true, nullsFirst: false })
+      .range(from, to);
+    if (error) throw error;
+    const chunk = (data ?? []) as Array<Record<string, any>>;
+    rows.push(...chunk);
+    if (chunk.length < PAGE) break;
+    from += PAGE;
+  }
+  return rows.slice(0, MAX);
+}
+
+export async function fetchDeliveryAnalytics(range: DateRangeValue): Promise<DeliveryAnalyticsData> {
+  const { startIso, endIso } = getDateRangeBounds(range);
+  const rangeStart = startIso ? new Date(startIso).getTime() : -Infinity;
+  const rangeEnd = endIso ? new Date(endIso).getTime() : Infinity;
+
+  const [{ data: plans, error: plansErr }, { data: profiles, error: profilesErr }, { data: collections, error: collectionErr }, { data: orderCollections, error: orderCollErr }] =
+    await Promise.all([
+      supabase.from("logistics_delivery_plans").select("id, assigned_profile_id"),
+      supabase.from("profiles").select("id, full_name"),
+      supabase
+        .from("logistics_shipment_collections")
+        .select(
+          "shipment_id, collection_status, pending_delivery_amount, collected_from_customer, collected_successfully_amount, payment_method",
+        ),
+      supabase
+        .from("logistics_order_collections")
+        .select("shipment_id, order_total, payment_method"),
+    ]);
+  if (plansErr) throw plansErr;
+  if (profilesErr) throw profilesErr;
+  if (collectionErr) throw collectionErr;
+  if (orderCollErr) throw orderCollErr;
+
+  const profileName = new Map<string, string>(
+    (profiles ?? []).map((p: any) => [String(p.id), String(p.full_name ?? "سائق")]),
+  );
+  const planDriver = new Map<string, string>();
+  for (const plan of plans ?? []) {
+    if (plan.assigned_profile_id) {
+      const name = profileName.get(String(plan.assigned_profile_id));
+      if (name) planDriver.set(String(plan.id), name);
+    }
+  }
+
+  const all = await fetchAllShipmentRows();
+  const parentDriver = new Map<string, string>();
+  for (const s of all) {
+    if (!s.is_return_shipment) continue;
+    const pid = s.parent_shipment_id ? String(s.parent_shipment_id) : null;
+    if (!pid) continue;
+    const parent = all.find((x) => String(x.id) === pid);
+    if (!parent) continue;
+    const driver = (parent.plan_id && planDriver.get(String(parent.plan_id)))
+      ?? (parent.assigned_user_name ? String(parent.assigned_user_name) : null);
+    if (driver) parentDriver.set(String(s.id), driver);
+  }
+
+  const collectionByShipment = new Map<string, Record<string, any>>();
+  for (const c of collections ?? []) {
+    collectionByShipment.set(String(c.shipment_id), c as Record<string, any>);
+  }
+
+  const orderCollByShipment = new Map<string, { total: number; byMethod: Record<string, number> }>();
+  for (const oc of (orderCollections ?? []) as any[]) {
+    const sid = String(oc.shipment_id);
+    let agg = orderCollByShipment.get(sid);
+    if (!agg) {
+      agg = { total: 0, byMethod: {} };
+      orderCollByShipment.set(sid, agg);
+    }
+    const amt = asNumber(oc.order_total);
+    const method = String(oc.payment_method ?? "cash");
+    agg.total += amt;
+    agg.byMethod[method] = (agg.byMethod[method] ?? 0) + amt;
+  }
+
+  const shipments = all
+    .map((s) => {
+      const status = String(s.shipment_status ?? "");
+      const isReturn = Boolean(s.is_return_shipment);
+      const closed = status === "DELIVERED" || status === "SETTLED" || status === "CANCELLED" || status === "FAILED";
+      const rawDate = isReturn ? s.created_at : closed ? s.completed_at ?? s.scheduled_at : s.scheduled_at ?? s.created_at;
+      const parsed = rawDate ? new Date(rawDate) : null;
+      const ts = parsed && Number.isFinite(parsed.getTime()) ? parsed.getTime() : null;
+      const driver = s.is_return_shipment && parentDriver.has(String(s.id))
+        ? parentDriver.get(String(s.id))!
+        : (s.plan_id && planDriver.get(String(s.plan_id)))
+          ?? (s.assigned_user_name ? String(s.assigned_user_name) : null)
+          ?? "غير محدد";
+      return {
+        id: String(s.id),
+        reference: String(s.shipment_reference ?? s.id ?? "—"),
+        customerName: s.customer_name ? String(s.customer_name) : null,
+        status,
+        isReturn: Boolean(s.is_return_shipment),
+        ts,
+        day: null as string | null,
+        driver,
+        coll: collectionByShipment.get(String(s.id)),
+        ordColl: orderCollByShipment.get(String(s.id)),
+      };
+    })
+    .filter((s) => s.ts !== null && s.ts >= rangeStart && s.ts <= rangeEnd);
+
+  function dayKey(ts: number | null): string | null {
+    if (ts === null) return null;
+    return new Date(ts).toISOString().slice(0, 10);
+  }
+
+  const daySet = new Set<string>();
+  const statusCounts: Record<string, number> = {};
+  const paymentAmounts: Record<string, number> = {};
+  const byDayMap = new Map<string, { date: string; delivered: number; returned: number; cancelled: number; open: number }>();
+  const driverMap = new Map<string, DeliveryDriverDaily>();
+
+  let deliveredTotal = 0;
+  let returnedTotal = 0;
+  let cancelledTotal = 0;
+  let openTotal = 0;
+  let codExpectedTotal = 0;
+  let codCollectedTotal = 0;
+
+  function ensureDriver(driver: string): string {
+    const key = driver || "غير محدد";
+    let stat = driverMap.get(key);
+    if (!stat) {
+      stat = { name: key, shipments: 0, delivered: 0, returned: 0, cancelled: 0, open: 0, successRate: 0, codExpected: 0, codCollected: 0, dueBalance: 0, daily: {} };
+      driverMap.set(key, stat);
+    }
+    return key;
+  }
+
+  for (const s of shipments) {
+    const day = dayKey(s.ts) ?? "بدون تاريخ";
+    s.day = day;
+    daySet.add(day);
+    statusCounts[s.status] = (statusCounts[s.status] ?? 0) + 1;
+    const dkey = ensureDriver(s.driver);
+    const stat = driverMap.get(dkey)!;
+    stat.shipments += 1;
+
+    let bucket = byDayMap.get(day);
+    if (!bucket) {
+      bucket = { date: day, delivered: 0, returned: 0, cancelled: 0, open: 0 };
+      byDayMap.set(day, bucket);
+    }
+
+    const coll = s.coll;
+    const ordColl = s.ordColl;
+    if (ordColl) {
+      const expected = ordColl.total;
+      const collected = ordColl.total;
+      codExpectedTotal += expected;
+      codCollectedTotal += collected;
+      stat.codExpected += expected;
+      stat.codCollected += collected;
+      for (const [method, amt] of Object.entries(ordColl.byMethod)) {
+        paymentAmounts[method] = (paymentAmounts[method] ?? 0) + amt;
+      }
+    } else if (coll) {
+      const collStatus = String(coll.collection_status ?? "");
+      const expected = collStatus === "collected_successfully"
+        ? asNumber(coll.collected_successfully_amount)
+        : collStatus === "collected_from_customer"
+          ? asNumber(coll.collected_from_customer)
+          : asNumber(coll.pending_delivery_amount);
+      const collected = collStatus === "collected_successfully" || collStatus === "collected_from_customer"
+        ? asNumber(coll.collected_successfully_amount) + asNumber(coll.collected_from_customer)
+        : 0;
+      codExpectedTotal += expected;
+      codCollectedTotal += collected;
+      stat.codExpected += expected;
+      stat.codCollected += collected;
+      const method = String(coll.payment_method ?? "cash");
+      paymentAmounts[method] = (paymentAmounts[method] ?? 0) + expected;
+    }
+
+    if (s.isReturn) {
+      returnedTotal += 1;
+      bucket.returned += 1;
+      stat.returned += 1;
+    } else if (s.status === "DELIVERED" || s.status === "SETTLED") {
+      deliveredTotal += 1;
+      bucket.delivered += 1;
+      stat.delivered += 1;
+      stat.daily[day] = (stat.daily[day] ?? 0) + 1;
+    } else if (s.status === "CANCELLED" || s.status === "FAILED") {
+      cancelledTotal += 1;
+      bucket.cancelled += 1;
+      stat.cancelled += 1;
+    } else {
+      openTotal += 1;
+      bucket.open += 1;
+      stat.open += 1;
+    }
+  }
+
+  const days = [...daySet].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const dailyTrend = days.map((d) => byDayMap.get(d) ?? { date: d, delivered: 0, returned: 0, cancelled: 0, open: 0 });
+
+  const successRate = shipments.length > 0
+    ? Math.round((deliveredTotal / shipments.length) * 100)
+    : 0;
+
+  const STATUS_LABEL_MAP: Record<string, string> = {
+    PENDING_ASSIGN: "بانتظار التخصيص",
+    ASSIGNED: "تم التخصيص",
+    CHECK_IN: "تسجيل الدخول",
+    PICKUP: "استلام الطلب",
+    OUT_FOR_DELIVERY: "في الطريق",
+    ARRIVED: "وصل للمكان",
+    DELIVERED: "تم التسليم",
+    FINISHED: "انتهت",
+    SETTLED: "تم التسوية",
+    CANCELLED: "ملغاة",
+  };
+  const statusDistribution = Object.entries(statusCounts).map(([key, value]) => ({
+    key,
+    label: STATUS_LABEL_MAP[key] ?? key,
+    value,
+  }));
+
+  const paymentMethods = Object.entries(paymentAmounts).map(([key, value]) => ({
+    key,
+    label: key === "cash" ? "نقدي" : key === "credit" ? "آجل / أقساط" : key === "cheque" ? "شيك" : key === "bank_transfer" ? "تحويل بنكي" : key,
+    value: Math.round(value),
+  }));
+
+  const drivers = [...driverMap.values()]
+    .map((d) => ({
+      ...d,
+      successRate: d.shipments > 0 ? Math.round((d.delivered / d.shipments) * 100) : 0,
+      dueBalance: Math.max(d.codExpected - d.codCollected, 0),
+    }))
+    .sort((a, b) => b.delivered - a.delivered || b.shipments - a.shipments);
+
+  const shipmentRows: DeliveryShipmentRow[] = shipments
+    .map((s) => {
+      const coll = s.coll;
+      const ordColl = s.ordColl;
+      const collStatus = coll ? String(coll.collection_status ?? "") : "";
+      let expected = 0;
+      let paymentMethod: string | null = null;
+      if (ordColl) {
+        expected = ordColl.total;
+        const methods = Object.entries(ordColl.byMethod);
+        if (methods.length > 0) paymentMethod = methods[0][0];
+      } else if (coll) {
+        expected = collStatus === "collected_successfully"
+          ? asNumber(coll.collected_successfully_amount)
+          : collStatus === "collected_from_customer"
+            ? asNumber(coll.collected_from_customer)
+            : asNumber(coll.pending_delivery_amount);
+        paymentMethod = coll ? String(coll.payment_method ?? "cash") : null;
+      }
+      return {
+        id: s.id,
+        reference: s.reference,
+        customerName: s.customerName,
+        status: s.status,
+        driver: s.driver,
+        date: s.day ?? "—",
+        isReturn: s.isReturn,
+        paymentMethod,
+        cod: expected,
+      };
+    })
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.reference.localeCompare(b.reference)));
+
+  return {
+    summary: {
+      totalShipments: shipments.length,
+      delivered: deliveredTotal,
+      returned: returnedTotal,
+      cancelled: cancelledTotal,
+      open: openTotal,
+      successRate,
+      codExpected: Math.round(codExpectedTotal),
+      codCollected: Math.round(codCollectedTotal),
+      underCollection: Math.round(Math.max(codExpectedTotal - codCollectedTotal, 0)),
+    },
+    days,
+    dailyTrend,
+    statusDistribution,
+    paymentMethods,
+    drivers,
+    shipmentRows,
+  };
+}
+
+export async function fetchAllShipments(range?: DateRangeValue): Promise<AllShipmentRow[]> {
+  let query = supabase
+    .from("logistics_shipments")
+    .select(
+      "id, shipment_reference, external_shipment_id, customer_name, warehouse_name, shipment_status, plan_id, assigned_user_name, completed_at, created_at, total_gmv, scheduled_at, orders:linked_order_id(commitment_date), logistics_delivery_plans!left(plan_reference, plan_status)",
+    )
+    .not("source", "eq", "manual_test")
+    .order("created_at", { ascending: false });
+
+  if (range) {
+    const { startIso, endIso } = getDateRangeBounds(range);
+    if (startIso) query = query.gte("scheduled_at", startIso);
+    if (endIso) query = query.lte("scheduled_at", endIso);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  return (data ?? []).map((row: any) => {
+    const plan = row.logistics_delivery_plans;
+    const order = Array.isArray(row.orders) ? row.orders[0] : row.orders;
+    return {
+      id: row.id,
+      reference: row.shipment_reference ?? row.external_shipment_id ?? row.id.slice(0, 8),
+      customerName: row.customer_name ?? null,
+      warehouseName: row.warehouse_name ?? null,
+      shipmentStatus: row.shipment_status ?? null,
+      planId: row.plan_id ?? null,
+      planReference: plan?.plan_reference ?? null,
+      planStatus: plan?.plan_status ?? null,
+      driverName: row.assigned_user_name ?? null,
+      completedAt: row.completed_at ?? null,
+      createdAt: row.created_at,
+      deliveryDate: dateOnly(order?.commitment_date ?? row.scheduled_at),
+      totalGmv: asNumber(row.total_gmv) ?? null,
+    };
+  });
+}

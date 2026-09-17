@@ -855,13 +855,15 @@ export default function DriverSettlementsPage() {
 
         const { data: shipments, error: shipmentsError } = await supabase
           .from("logistics_shipments")
-          .select("id, plan_id, shipment_status, total_gmv, linked_order_id")
+          .select("id, plan_id, shipment_status, total_gmv, linked_order_id, is_return_shipment")
           .in("plan_id", planIds);
 
         if (shipmentsError) throw shipmentsError;
 
         const shipmentRows = (shipments ?? []).filter(
-          (shipment) => !["CANCELLED", "FAILED"].includes(String(shipment.shipment_status ?? ""))
+          (shipment) =>
+            !["CANCELLED", "FAILED"].includes(String(shipment.shipment_status ?? "")) &&
+            !shipment.is_return_shipment
         );
         const shipmentIds = shipmentRows.map((shipment) => shipment.id);
         const orderIds = [

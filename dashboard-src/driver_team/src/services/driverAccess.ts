@@ -86,6 +86,9 @@ export async function resolveDriverProfile(authUser: User): Promise<DriverProfil
     throw new Error('هذا الحساب غير نشط.');
   }
 
+  const profileRole = String(profileData.role ?? '').trim().toLowerCase();
+  const isDriverRole = profileRole === 'driver';
+
   // Check for linked logistics_users record for driver-specific metadata
   const { data: logisticsData, error: logisticsError } = await supabase
     .from('logistics_users')
@@ -102,8 +105,7 @@ export async function resolveDriverProfile(authUser: User): Promise<DriverProfil
 
   // If user has a logistics_users record, verify they are a driver
   if (logisticsData) {
-    if (
-      !isDriverLogisticsUser({
+    if (!isDriverRole && !isDriverLogisticsUser({
         job_title: logisticsData.job_title,
         activity_type_name: logisticsData.activity_type_name,
         department_name: logisticsData.department_name,
@@ -128,16 +130,15 @@ export async function resolveDriverProfile(authUser: User): Promise<DriverProfil
       email: logisticsData.work_email ?? profileData.email ?? authUser.email ?? null,
       workPhone: logisticsData.work_phone ?? null,
       mobilePhone: logisticsData.mobile_phone ?? null,
-      jobTitle: logisticsData.job_title ?? null,
+      jobTitle: logisticsData.job_title || profileRole || null,
       workLocation: logisticsData.work_location ?? null,
       companyName: logisticsData.company_name ?? null,
       requiresPasswordChange: Boolean(profileData.requires_password_change),
     };
   }
 
-  // No logistics_users record — check if profile role allows management access
-  const profileRole = String(profileData.role ?? '').trim().toLowerCase();
-  if (MANAGEMENT_ROLES.has(profileRole)) {
+  // No logistics_users record — check if profile role allows driver/management access
+  if (isDriverRole || MANAGEMENT_ROLES.has(profileRole)) {
     const email = String(profileData.email ?? authUser.email ?? '').trim() || null;
     const fallbackName = email?.split('@')[0]?.replace(/[._-]+/g, ' ') ?? 'Admin';
 

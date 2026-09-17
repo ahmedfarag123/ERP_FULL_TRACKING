@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import L, { type LatLngBoundsExpression, type LatLngExpression, type DivIcon } from "leaflet";
 import {
+  Circle,
   CircleMarker,
   MapContainer,
   Marker,
@@ -44,6 +45,13 @@ export type MapDriverLocation = {
   longitude: number;
   updatedAt: string;
   headingDegrees?: number | null;
+  accuracyMeters?: number | null;
+  completedToday?: boolean;
+};
+
+export type MapDriverTrack = {
+  driverId: string;
+  points: Array<{ lat: number; lng: number }>;
 };
 
 export type MapShipmentStop = {
@@ -52,6 +60,7 @@ export type MapShipmentStop = {
   shipmentStatus: string | null;
   latitude: number;
   longitude: number;
+  routeSequence?: number | null;
 };
 
 export type MapPlanRoute = {
@@ -59,9 +68,12 @@ export type MapPlanRoute = {
   planReference: string;
   driverId: string;
   driverName: string;
+  planStatus?: string | null;
   warehouseName: string;
   warehouseLatitude: number;
   warehouseLongitude: number;
+  driverLatitude?: number;
+  driverLongitude?: number;
   stops: MapShipmentStop[];
 };
 
@@ -75,6 +87,8 @@ type Props = {
   drivers: MapDriverLocation[];
   plans: MapPlanRoute[];
   primaryWarehouse?: MapPrimaryWarehouse | null;
+  tracks?: MapDriverTrack[];
+  onDriverSelect?: (driverId: string | null) => void;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -116,6 +130,21 @@ function nearestNeighborSort(
   return sorted;
 }
 
+function sortPlanStops(
+  stops: MapShipmentStop[],
+  origin: { lat: number; lng: number }
+): MapShipmentStop[] {
+  const anySequence = stops.some(
+    (s) => typeof s.routeSequence === "number" && Number.isFinite(s.routeSequence)
+  );
+  if (anySequence) {
+    return [...stops].sort(
+      (a, b) => (a.routeSequence ?? Number.MAX_SAFE_INTEGER) - (b.routeSequence ?? Number.MAX_SAFE_INTEGER)
+    );
+  }
+  return nearestNeighborSort(stops, origin);
+}
+
 function computeTotalDistanceKm(stops: MapShipmentStop[], origin: { lat: number; lng: number }): number {
   if (stops.length === 0) return 0;
   let total = haversineKm(origin, { lat: stops[0].latitude, lng: stops[0].longitude });
@@ -138,6 +167,8 @@ const DRIVER_COLORS = [
 function driverColor(index: number): string {
   return DRIVER_COLORS[index % DRIVER_COLORS.length];
 }
+
+const SECONDARY_PLAN_COLOR = "#9ca3af";
 
 function driverIconHtml(color: string, heading?: number | null): string {
   const hasHeading = typeof heading === "number" && Number.isFinite(heading);
@@ -258,6 +289,8 @@ function PlanRouteLine({
   color,
   warehouseLatitude,
   warehouseLongitude,
+  driverLatitude,
+  driverLongitude,
   isActive,
   useOrs,
   onClick,
@@ -266,21 +299,29 @@ function PlanRouteLine({
   color: string;
   warehouseLatitude: number;
   warehouseLongitude: number;
+  driverLatitude?: number;
+  driverLongitude?: number;
   isActive: boolean;
   useOrs: boolean;
   onClick: () => void;
 }) {
   const [orsRoute, setOrsRoute] = useState<LatLngExpression[] | null>(null);
 
-  const sortedStops = useMemo(
-    () => nearestNeighborSort(stops, { lat: warehouseLatitude, lng: warehouseLongitude }),
-    [stops, warehouseLatitude, warehouseLongitude]
-  );
+  const origin = useMemo(() => {
+    const latOk = typeof driverLatitude === "number" && Number.isFinite(driverLatitude) && driverLatitude !== 0;
+    const lngOk = typeof driverLongitude === "number" && Number.isFinite(driverLongitude) && driverLongitude !== 0;
+    return latOk && lngOk
+      ? { lat: driverLatitude as number, lng: driverLongitude as number }
+      : { lat: warehouseLatitude, lng: warehouseLongitude };
+  }, [driverLatitude, driverLongitude, warehouseLatitude, warehouseLongitude]);
 
-  const points = [
-    { lat: warehouseLatitude, lng: warehouseLongitude },
-    ...sortedStops.map((s) => ({ lat: s.latitude, lng: s.longitude })),
-  ];
+  const lineStops = useMemo(() => {
+    const TERMINAL = new Set(["DELIVERED", "FINISHED", "SETTLED", "CANCELLED"]);
+    const remaining = stops.filter((s) => !TERMINAL.has(s.shipmentStatus ?? ""));
+    return sortPlanStops(remaining, origin);
+  }, [stops, origin]);
+
+  const points = [origin, ...lineStops.map((s) => ({ lat: s.latitude, lng: s.longitude }))];
   const pointsKey = points.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join("|");
 
   useEffect(() => {
@@ -424,7 +465,7 @@ function DriverCard({
   driver: {
     driverId: string;
     driverName: string;
-    plans: { planId: string; planReference: string; stops: MapShipmentStop[]; warehouseName: string }[];
+    plans: { planId: string; planReference: string; planStatus?: string | null; stops: MapShipmentStop[]; warehouseName: string }[];
     totalStops: number;
     totalDist: number;
   };
@@ -525,11 +566,11 @@ function DriverCard({
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
+function TrackingMapInner({ drivers, plans, primaryWarehouse, tracks, onDriverSelect }: Props) {
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
   const [tileMode, setTileMode] = useState<MapTileMode>("map");
   const [fullscreen, setFullscreen] = useState(false);
-  const [useOrs, setUseOrs] = useState(false);
+  const [useOrs, setUseOrs] = useState(true);
   const [hideStale, setHideStale] = useState(false);
   const mapRef = useRef<HTMLDivElement>(null);
   const didDefaultFocus = useRef(false);
@@ -559,7 +600,7 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
     () =>
       plans.map((plan) => ({
         ...plan,
-        stops: nearestNeighborSort(plan.stops, {
+        stops: sortPlanStops(plan.stops, {
           lat: plan.warehouseLatitude,
           lng: plan.warehouseLongitude,
         }),
@@ -596,12 +637,34 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
     return [...map.values()];
   }, [plansWithSortedStops]);
 
+  const grayPlanIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const d of driversWithPlans) {
+      if (d.plans.length > 1) {
+        for (const p of d.plans) {
+          if (p.planStatus !== "in_progress") {
+            ids.add(p.planId);
+          }
+        }
+      } else {
+        for (const p of d.plans) {
+          if (p.planStatus === "completed") {
+            ids.add(p.planId);
+          }
+        }
+      }
+    }
+    return ids;
+  }, [driversWithPlans]);
+
   useEffect(() => {
     if (didDefaultFocus.current) return;
     if (driversWithPlans.length === 0) return;
     didDefaultFocus.current = true;
-    setSelectedDriverId(driversWithPlans[0].driverId);
-  }, [driversWithPlans]);
+    const firstId = driversWithPlans[0].driverId;
+    setSelectedDriverId(firstId);
+    onDriverSelect?.(firstId);
+  }, [driversWithPlans, onDriverSelect]);
 
   const filteredPlans = useMemo(
     () =>
@@ -622,9 +685,21 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
     return list;
   }, [drivers, selectedDriverId, hideStale]);
 
+  const filteredTracks = useMemo(
+    () =>
+      (tracks ?? []).filter(
+        (track) => !selectedDriverId || track.driverId === selectedDriverId
+      ),
+    [tracks, selectedDriverId]
+  );
+
   const handleSelectDriver = useCallback((driverId: string) => {
-    setSelectedDriverId((prev) => (prev === driverId ? null : driverId));
-  }, []);
+    setSelectedDriverId((prev) => {
+      const next = prev === driverId ? null : driverId;
+      onDriverSelect?.(next);
+      return next;
+    });
+  }, [onDriverSelect]);
 
   const allCoords = useMemo(() => {
     const pts: LatLngExpression[] = [];
@@ -773,10 +848,31 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
           />
           {mapBounds ? <FitBounds bounds={mapBounds} /> : mainWarehouse ? <SingleWarehouseFocus center={mapCenter as LatLngExpression} /> : null}
 
+          {/* Driven trail (actual pings) */}
+          {filteredTracks.map((track) => {
+            if (track.points.length < 2) return null;
+            const idx = driverIndexMap.get(track.driverId) ?? 0;
+            const color = driverColor(idx);
+            return (
+              <Polyline
+                key={`track-${track.driverId}`}
+                positions={track.points.map((p) => [p.lat, p.lng] as LatLngExpression)}
+                pathOptions={{
+                  color,
+                  weight: 3,
+                  opacity: 0.55,
+                  dashArray: "1 7",
+                  lineCap: "round",
+                  lineJoin: "round",
+                }}
+              />
+            );
+          })}
+
           {/* Route lines */}
           {filteredPlans.map((plan) => {
             const idx = driverIndexMap.get(plan.driverId) ?? 0;
-            const color = driverColor(idx);
+            const color = grayPlanIds.has(plan.planId) ? SECONDARY_PLAN_COLOR : driverColor(idx);
             return (
               <PlanRouteLine
                 key={plan.planId}
@@ -784,6 +880,8 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
                 color={color}
                 warehouseLatitude={plan.warehouseLatitude}
                 warehouseLongitude={plan.warehouseLongitude}
+                driverLatitude={plan.driverLatitude}
+                driverLongitude={plan.driverLongitude}
                 isActive
                 useOrs={useOrs}
                 onClick={() => handleSelectDriver(plan.driverId)}
@@ -803,7 +901,7 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
           {/* Stop markers */}
           {filteredPlans.map((plan) => {
             const idx = driverIndexMap.get(plan.driverId) ?? 0;
-            const color = driverColor(idx);
+            const color = grayPlanIds.has(plan.planId) ? SECONDARY_PLAN_COLOR : driverColor(idx);
             return plan.stops.map((stop, sIdx) => (
               <StopMarker
                 key={`${plan.planId}-${stop.id}`}
@@ -922,6 +1020,11 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
                     style={{ background: color }}
                   />
                   {dp.driverName}
+                  {dp.plans.length === 1 && dp.plans[0].planStatus === "completed" && (
+                    <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                      مكتملة
+                    </span>
+                  )}
                 </span>
               );
             })}
@@ -944,6 +1047,11 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse }: Props) {
                       style={{ background: color }}
                     />
                     <span className="text-xs font-bold text-gray-900 dark:text-white">{dp.driverName}</span>
+                    {dp.plans.length === 1 && dp.plans[0].planStatus === "completed" && (
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                        خلص الخطة
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-4 text-[10px] text-gray-500 dark:text-gray-400">
                     <span>{dp.plans.length} خطة{dp.plans.length !== 1 ? "ط" : ""}</span>
@@ -970,46 +1078,80 @@ function DriverMarker({
   color: string;
 }) {
   const hasHeading = typeof driver.headingDegrees === "number" && Number.isFinite(driver.headingDegrees);
+  const accuracyMeters =
+    typeof driver.accuracyMeters === "number" &&
+    Number.isFinite(driver.accuracyMeters) &&
+    driver.accuracyMeters > 0 &&
+    driver.accuracyMeters <= 300
+      ? driver.accuracyMeters
+      : null;
+
   return (
-    <Marker position={[driver.latitude, driver.longitude]} icon={icon}>
-      <Tooltip direction="top" offset={[0, -18]} opacity={1}>
-        <div
-          style={{
-            fontFamily: "sans-serif",
-            textAlign: "right",
-            direction: "rtl",
-            minWidth: 120,
+    <>
+      {accuracyMeters ? (
+        <Circle
+          center={[driver.latitude, driver.longitude]}
+          radius={accuracyMeters}
+          pathOptions={{
+            color,
+            weight: 1,
+            opacity: 0.35,
+            fillColor: color,
+            fillOpacity: 0.06,
+            dashArray: "3 4",
           }}
-        >
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-block h-2.5 w-2.5 rounded-full"
-              style={{ background: color }}
-            />
-            <span className="text-xs font-bold text-gray-900 dark:text-white">{driver.driverName}</span>
+        />
+      ) : null}
+      <Marker position={[driver.latitude, driver.longitude]} icon={icon}>
+        <Tooltip direction="top" offset={[0, -18]} opacity={1}>
+          <div
+            style={{
+              fontFamily: "sans-serif",
+              textAlign: "right",
+              direction: "rtl",
+              minWidth: 120,
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-block h-2.5 w-2.5 rounded-full"
+                style={{ background: color }}
+              />
+              <span className="text-xs font-bold text-gray-900 dark:text-white">{driver.driverName}</span>
+            </div>
+            <div className="mt-1 flex items-center gap-3 text-[10px] text-gray-500 dark:text-gray-400">
+              {hasHeading ? (
+                <span className="flex items-center gap-1">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M4 14c4 2 6 4 8 6" />
+                    <path d="M20 4c-6 2-10 6-12 12" />
+                    <circle cx="4" cy="14" r="2" />
+                    <circle cx="20" cy="4" r="2" />
+                  </svg>
+                  {Math.round(driver.headingDegrees as number)}° ضلع
+                </span>
+              ) : (
+                <span>
+                  {driver.updatedAt && (Date.now() - new Date(driver.updatedAt).getTime()) < 15 * 60 * 1000
+                    ? "موقع مباشر"
+                    : `آخر تحديث ${timeAgo(driver.updatedAt)}`}
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400">
+              {accuracyMeters ? (
+                <span className="font-medium text-indigo-500 dark:text-indigo-400">
+                  دقة ±{Math.round(accuracyMeters)} م
+                </span>
+              ) : null}
+              {driver.updatedAt ? (
+                <span>{timeAgo(driver.updatedAt)}</span>
+              ) : null}
+            </div>
           </div>
-          <div className="mt-1 flex items-center gap-3 text-[10px] text-gray-500 dark:text-gray-400">
-            {hasHeading ? (
-              <span className="flex items-center gap-1">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M4 14c4 2 6 4 8 6" />
-                  <path d="M20 4c-6 2-10 6-12 12" />
-                  <circle cx="4" cy="14" r="2" />
-                  <circle cx="20" cy="4" r="2" />
-                </svg>
-                {Math.round(driver.headingDegrees as number)}° ضلع
-              </span>
-            ) : (
-              <span>
-                {driver.updatedAt && (Date.now() - new Date(driver.updatedAt).getTime()) < 15 * 60 * 1000
-                  ? "موقع مباشر"
-                  : `آخر تحديث ${timeAgo(driver.updatedAt)}`}
-              </span>
-            )}
-          </div>
-        </div>
-      </Tooltip>
-    </Marker>
+        </Tooltip>
+      </Marker>
+    </>
   );
 }
 

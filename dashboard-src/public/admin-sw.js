@@ -1,4 +1,4 @@
-const CACHE_NAME = 'horeca-admin-v81';
+const CACHE_NAME = 'horeca-admin-v97';
 const APP_SHELL = [
   '/',
   '/index.html',

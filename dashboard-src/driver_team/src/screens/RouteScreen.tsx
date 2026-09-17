@@ -351,14 +351,13 @@ export default function RouteScreen() {
     return getPlanShipments(selectedPlanId);
   }, [selectedPlanId, getPlanShipments]);
 
-  const { nextActionableShipmentId, outOfSequenceShipmentIds } = getRouteGate(selectedPlanId ?? undefined);
+  const { nextActionableShipmentId } = getRouteGate(selectedPlanId ?? undefined);
 
   const getStopStatus = (shipmentId: string, shipmentStatus: string): string => {
     if (shipmentStatus === 'failed') return 'failed';
-    if (outOfSequenceShipmentIds.has(shipmentId)) return 'out-of-sequence';
     if (shipmentStatus === 'delivered') return 'completed';
     if (shipmentId === nextActionableShipmentId) return 'current';
-    return 'locked';
+    return 'upcoming';
   };
 
   /* ─── Drill-down View (Plan Shipments) ─── */

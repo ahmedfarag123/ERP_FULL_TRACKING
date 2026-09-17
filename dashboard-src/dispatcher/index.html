@@ -25,7 +25,7 @@
       ) {
         window.addEventListener('load', () => {
           const scopePath = window.location.pathname.replace(/\/[^/]*$/, '/');
-          navigator.serviceWorker.register(`${scopePath}sw.js?v=4`).catch((error) => {
+          navigator.serviceWorker.register(`${scopePath}sw.js?v=5`).catch((error) => {
             console.warn('Dispatcher service worker registration failed:', error);
           });
         });

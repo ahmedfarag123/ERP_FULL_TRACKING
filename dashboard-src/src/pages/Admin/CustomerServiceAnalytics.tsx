@@ -472,13 +472,13 @@ export default function CustomerServiceAnalytics() {
   }
 
   function getTicketDeliveryKey(t: TicketRow & { order: { delivery_status: string | null } | null; raw_payload: Record<string, unknown> | null }): string {
-    const orderStatus = Array.isArray(t.order) ? t.order[0]?.delivery_status : t.order?.delivery_status;
-    if (orderStatus && orderStatus !== "false") return orderStatus;
     const xl = t.raw_payload?.delivery_status_xl;
     if (xl === "بالكامل") return "full";
     if (xl === "مرتجع جزئى") return "partial";
-    if (["مرتجع كلى بعد الوصول","مرتجع كلى قبل الوصول","مرتجع كلي","مرتجع كلى","الغاء"].includes(String(xl ?? ""))) return "cancelled";
+    if (["مرتجع كلى بعد الوصول","مرتجع كلى قبل الوصول","مرتجع كلي","مرتجع كلى","الغاء","مرتجع"].includes(String(xl ?? ""))) return "cancelled";
     if (xl) return "other_delivery";
+    const orderStatus = Array.isArray(t.order) ? t.order[0]?.delivery_status : t.order?.delivery_status;
+    if (orderStatus && orderStatus !== "false") return orderStatus;
     return "unknown";
   }
 
@@ -559,11 +559,11 @@ export default function CustomerServiceAnalytics() {
     tickets: p.ticket_count,
   }));
 
-  const rangeLabel = quickRange === "7d" ? "Last Week" : quickRange === "30d" ? "Last 30 Days" : "Selected Period";
+  const rangeLabel = quickRange === "7d" ? "آخر أسبوع" : quickRange === "30d" ? "آخر 30 يوم" : "الفترة المحددة";
 
   return (
     <>
-      <PageMeta title="Score Cards | خدمة العملاء" description="Score Cards of the week - Customer Service" />
+      <PageMeta title="بطاقات الأداء | خدمة العملاء" description="بطاقات أداء خدمة العملاء" />
 
       <div className="min-h-screen bg-gray-50/50 dark:bg-gray-950" dir="rtl">
         <div className="mx-auto max-w-[1400px] p-6">
@@ -582,13 +582,13 @@ export default function CustomerServiceAnalytics() {
               </div>
 
               <div className="text-center">
-                <h1 className="text-3xl font-extrabold tracking-tight text-white">Score Cards of the week</h1>
-                <p className="mt-1 text-sm text-blue-200">6. Customer Service</p>
+                <h1 className="text-3xl font-extrabold tracking-tight text-white">بطاقات الأداء الأسبوعية</h1>
+                <p className="mt-1 text-sm text-blue-200">6. خدمة العملاء</p>
               </div>
 
               <div className="mt-5 flex items-center justify-center gap-3" dir="ltr">
                 <div className="flex gap-1 rounded-xl bg-white/10 p-1 backdrop-blur-sm">
-                  {[{ label: "7 Days", value: "7d" }, { label: "30 Days", value: "30d" }].map((qr) => (
+                  {[{ label: "٧ أيام", value: "7d" }, { label: "٣٠ يوم", value: "30d" }].map((qr) => (
                     <button
                       key={qr.value}
                       type="button"
@@ -615,10 +615,10 @@ export default function CustomerServiceAnalytics() {
             {/* KPI Cards */}
             <div className="px-8 pb-6">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <KpiCard title="Count Of Tickets" value={isLoading ? "—" : total} subtitle={`${rangeLabel} ${prevTotal > 0 ? (totalTrend >= 0 ? "+" : "") + totalTrend.toFixed(0) + "% vs prev" : ""}`} delay={0} onClick={() => openKpiDetail("total")} />
-                <KpiCard title="Resolved Tickets" value={isLoading ? "—" : resolved} subtitle={`${rangeLabel} ${prevResolved > 0 ? (resolvedTrend >= 0 ? "+" : "") + resolvedTrend.toFixed(0) + "% vs prev" : ""}`} delay={0.05} onClick={() => openKpiDetail("resolved")} />
-                <KpiCard title="Percent of Tickets" value={isLoading ? "—" : `${percentage}%`} subtitle={`${rangeLabel} ${total > 0 ? resolved + "/" + total + " resolved" : ""}`} delay={0.1} onClick={() => openKpiDetail("percent")} />
-                <KpiCard title="Resolving Rate" value={isLoading ? "—" : `${resolveRate}%`} subtitle={rangeLabel} delay={0.15} onClick={() => openKpiDetail("rate")} />
+                <KpiCard title="عدد التذاكر" value={isLoading ? "—" : total} subtitle={`${rangeLabel} ${prevTotal > 0 ? (totalTrend >= 0 ? "+" : "") + totalTrend.toFixed(0) + "% عن الفترة السابقة" : ""}`} delay={0} onClick={() => openKpiDetail("total")} />
+                <KpiCard title="تم الحل" value={isLoading ? "—" : resolved} subtitle={`${rangeLabel} ${prevResolved > 0 ? (resolvedTrend >= 0 ? "+" : "") + resolvedTrend.toFixed(0) + "% عن الفترة السابقة" : ""}`} delay={0.05} onClick={() => openKpiDetail("resolved")} />
+                <KpiCard title="نسبة التذاكر" value={isLoading ? "—" : `${percentage}%`} subtitle={`${rangeLabel} ${total > 0 ? resolved + "/" + total + " تم الحل" : ""}`} delay={0.1} onClick={() => openKpiDetail("percent")} />
+                <KpiCard title="معدل الحل" value={isLoading ? "—" : `${resolveRate}%`} subtitle={rangeLabel} delay={0.15} onClick={() => openKpiDetail("rate")} />
               </div>
             </div>
 

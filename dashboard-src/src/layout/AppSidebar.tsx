@@ -66,6 +66,18 @@ const navItems: NavItem[] = [
     requiredPermissions: ["customers.view", "customers.assign", "customers.manage"],
   },
   {
+    name: "مؤشرات الأداء",
+    icon: <PieChartIcon />,
+    path: "/kpis",
+    requiredPermissions: ["dashboard.view"],
+  },
+  {
+    name: "بطاقات الأداء",
+    icon: <TableIcon />,
+    path: "/scorecards",
+    requiredPermissions: ["dashboard.view"],
+  },
+  {
     name: "المشتريات",
     icon: <BoxCubeIcon />,
     path: "/procurement",
@@ -108,6 +120,7 @@ const navItems: NavItem[] = [
     requiredPermissions: ["logistics.view", "logistics.manage"],
     subItems: [
       { name: "لوحة اللوجستيات", path: "/logistics", requiredPermissions: ["logistics.view"] },
+      { name: "تحليلات التوصيل", path: "/logistics/analytics", requiredPermissions: ["logistics.view"] },
       { name: "الشحنات", path: "/logistics/shipments", requiredPermissions: ["logistics.view"] },
       { name: "الخطط", path: "/logistics/plans", requiredPermissions: ["logistics.view"] },
       { name: "خطة جديدة", path: "/logistics/plans/new", requiredPermissions: ["logistics.manage"] },
@@ -219,7 +232,7 @@ const AppSidebar: React.FC = () => {
     (items: NavItem[]) =>
       items.filter((item) => {
         if (item.name === "إدارة المستخدمين" && authUser?.email !== "ahmed-farag@hs.com") return false;
-        if (item.name === "التكويد" && authUser?.email !== "ahmed-farag@hs.com") return false;
+        if (item.name === "التكويد" && authUser?.email !== "ahmed-farag@hs.com" && authUser?.email !== "maha-mohamed@hs.com" && authUser?.email !== "shaimaa@hs.com") return false;
 
         if (item.subItems?.length) {
           return getVisibleSubItems(item).length > 0;

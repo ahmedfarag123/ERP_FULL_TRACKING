@@ -1,4 +1,4 @@
-const DRIVER_CACHE = "driver-workspace-v7";
+const DRIVER_CACHE = "driver-workspace-v8";
 const IS_LOCAL_DEV_HOST =
   self.location.hostname === "localhost" ||
   self.location.hostname === "127.0.0.1" ||
@@ -143,18 +143,14 @@ self.addEventListener("fetch", (event) => {
   }
 
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) {
-        return cached;
-      }
-
-      return fetch(request).then((response) => {
+    fetch(request)
+      .then((response) => {
         if (response.ok && request.url.startsWith(self.location.origin)) {
           const cloned = response.clone();
           caches.open(DRIVER_CACHE).then((cache) => cache.put(request, cloned));
         }
         return response;
-      }).catch(() => caches.match(request));
-    })
+      })
+      .catch(() => caches.match(request))
   );
 });

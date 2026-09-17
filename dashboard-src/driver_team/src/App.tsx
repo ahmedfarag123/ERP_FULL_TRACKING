@@ -83,9 +83,6 @@ export default function App() {
   useEffect(() => {
     const handleOnline = () => {
       setOffline(false);
-      // Auto-sync offline actions and IndexedDB pending writes on reconnect
-      void useUIStore.getState().syncOfflineActions().catch(() => undefined);
-      void useUIStore.getState().syncPendingIndexedDBWrites().catch(() => undefined);
     };
     const handleOffline = () => setOffline(true);
 
@@ -101,7 +98,7 @@ export default function App() {
     };
   }, [setOffline]);
 
-  // Realtime subscription for assigned plan changes
+// Realtime subscription for assigned plan changes
   useEffect(() => {
     if (!isAuthenticated || requiresPasswordChange || !profileId) return;
 
@@ -114,6 +111,31 @@ export default function App() {
           schema: 'public',
           table: 'logistics_delivery_plans',
           filter: `assigned_profile_id=eq.${profileId}`,
+        },
+        () => {
+          useDeliveryStore.getState().scheduleRealtimeRefresh();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [isAuthenticated, profileId, requiresPasswordChange]);
+
+  // Realtime subscription for co-driver (assignee) plan changes
+  useEffect(() => {
+    if (!isAuthenticated || requiresPasswordChange || !profileId) return;
+
+    const channel = supabase
+      .channel(`driver-assignees-${profileId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'logistics_plan_assignees',
+          filter: `profile_id=eq.${profileId}`,
         },
         () => {
           useDeliveryStore.getState().scheduleRealtimeRefresh();

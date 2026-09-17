@@ -6336,6 +6336,48 @@ export type Database = {
       }
         Relationships: []
       }
+    "scorecard_values": {
+        Row: {
+      "created_at": string | null,
+      "currency": string | null,
+      "department": string,
+      "id": string,
+      "metadata": Json | null,
+      "note": string | null,
+      "period_end": string | null,
+      "period_start": string | null,
+      "scorecard": string,
+      "scorecard_key": string,
+      "value": number | null
+        },
+        Insert: {
+      "created_at"?: string | null,
+      "currency"?: string | null,
+      "department"?: string,
+      "id"?: string,
+      "metadata"?: Json | null,
+      "note"?: string | null,
+      "period_end"?: string | null,
+      "period_start"?: string | null,
+      "scorecard": string,
+      "scorecard_key": string,
+      "value"?: number | null
+        },
+        Update: {
+      "created_at"?: string | null,
+      "currency"?: string | null,
+      "department"?: string,
+      "id"?: string,
+      "metadata"?: Json | null,
+      "note"?: string | null,
+      "period_end"?: string | null,
+      "period_start"?: string | null,
+      "scorecard"?: string,
+      "scorecard_key"?: string,
+      "value"?: number | null
+        },
+        Relationships: []
+      }
     }
     Views: {
       "v_balance_sheet": {

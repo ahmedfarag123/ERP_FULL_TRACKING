@@ -10,18 +10,20 @@ import { useUrlEnumParam } from "../../../hooks/useUrlState";
 import { KpiDictionaryTab } from "./components/tabs/KpiDictionaryTab";
 import { DeptScorecardTab } from "./components/tabs/DeptScorecardTab";
 import { IndividualKpisTab } from "./components/tabs/IndividualKpisTab";
+import { SalesAgentKpisTab } from "./components/tabs/SalesAgentKpisTab";
 import { KPI_DICTIONARY, buildScorecardFromDictionary } from "./data/kpi-formulas";
 import { DEPARTMENTS } from "./data/department-meta";
 import { supabase } from "../../../lib/supabase";
 import type { ScorecardStatus } from "../../../types/kpi";
 
-const TAB_KEYS = ["scorecard", "dictionary", "individual"] as const;
+const TAB_KEYS = ["scorecard", "dictionary", "individual", "saleskpi"] as const;
 type TabKey = (typeof TAB_KEYS)[number];
 
 const tabs: { key: TabKey; label: string }[] = [
   { key: "scorecard", label: "بطاقة النتائج" },
   { key: "dictionary", label: "قاموس المؤشرات" },
   { key: "individual", label: "المؤشرات الفردية" },
+  { key: "saleskpi", label: "مؤشرات مندوبي المبيعات" },
 ];
 
 async function fetchAllKpiActuals(dateFrom: string, dateTo: string) {
@@ -307,6 +309,7 @@ export default function KPIDashboardPage() {
             )
           )}
           {activeTab === "individual" && <IndividualKpisTab dateRange={dateRange} />}
+          {activeTab === "saleskpi" && <SalesAgentKpisTab />}
         </Suspense>
       </AdminPageFrame>
     </>

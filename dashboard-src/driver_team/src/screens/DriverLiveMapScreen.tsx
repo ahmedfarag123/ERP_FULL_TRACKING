@@ -9,7 +9,7 @@ import { supabase } from '@/lib/supabase';
 
 const ORS_API_KEY = String(import.meta.env.VITE_ORS_API_KEY ?? '').trim();
 
-const FALLBACK_WAREHOUSE = { label: 'Horeca Marg', lat: 30.1592333, lng: 31.357159 };
+const FALLBACK_WAREHOUSE = { label: 'Horeca Marg', lat: 30.157468, lng: 31.359598 };
 
 type MapMode = 'standard' | 'satellite' | 'terrain';
 const TILE_SOURCES: Record<MapMode, { url: string; attribution: string }> = {

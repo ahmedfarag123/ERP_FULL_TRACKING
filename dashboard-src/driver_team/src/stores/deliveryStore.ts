@@ -18,7 +18,6 @@ import {
 } from '@/services/driverWorkflow';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
-import { getCached, setCache, queuePendingWrite } from '@/lib/offlineCache';
 
 type RouteGate = {
   routeShipments: Shipment[];
@@ -29,6 +28,9 @@ type RouteGate = {
 interface DeliveryState {
   shipments: Shipment[];
   allPlans: AssignedPlanRow[];
+  pendingPlans: AssignedPlanRow[];
+  viewerPlans: AssignedPlanRow[];
+  viewerShipments: Shipment[];
   activePlanId: string | null;
   selectedPlanId: string | null;
   statusFilter: ShipmentStatus | 'all';
@@ -37,6 +39,7 @@ interface DeliveryState {
   isLoading: boolean;
   isSavingAction: boolean;
   error: string | null;
+  attendedToday: boolean;
 
   setStatusFilter: (filter: ShipmentStatus | 'all') => void;
   setSearchQuery: (query: string) => void;
@@ -511,10 +514,6 @@ type QueuedShipmentPhaseUpdate = {
   payload?: Record<string, unknown>;
 };
 
-function isOfflineNow() {
-  return useUIStore.getState().isOffline || (typeof navigator !== 'undefined' && !navigator.onLine);
-}
-
 async function sendShipmentPhaseUpdates(updates: QueuedShipmentPhaseUpdate[]) {
   const location = await getCurrentDriverLocation();
 
@@ -543,35 +542,6 @@ async function persistOrQueueShipmentUpdates(
   set: (state: Partial<DeliveryState>) => void,
   reload: () => Promise<void>
 ) {
-  if (isOfflineNow()) {
-    const { queueOfflineAction } = useUIStore.getState();
-    updates.forEach((update) => {
-      queueOfflineAction({
-        type: update.actionType,
-        shipmentId: update.shipmentId,
-        payload: {
-          ...update.payload,
-          nextPhase: update.nextPhase,
-          note: update.note,
-          proofPhotoPath: update.proofPhotoPath,
-        },
-      });
-      // Also persist to IndexedDB for extra reliability
-      void queuePendingWrite({
-        table: 'logistics_shipment_events',
-        operation: 'insert',
-        payload: {
-          shipment_id: update.shipmentId,
-          next_phase: update.nextPhase,
-          note: update.note,
-          proof_photo_path: update.proofPhotoPath,
-          ...update.payload,
-        },
-      });
-    });
-    return;
-  }
-
   try {
     await sendShipmentPhaseUpdates(updates);
   } catch (error) {
@@ -587,7 +557,11 @@ async function persistOrQueueShipmentUpdates(
 type FrontendShipmentsResult = {
   activePlanId: string | null;
   allPlans: AssignedPlanRow[];
+  pendingPlans: AssignedPlanRow[];
   shipments: Shipment[];
+  viewerPlans: AssignedPlanRow[];
+  viewerShipments: Shipment[];
+  attendedToday: boolean;
 };
 
 let frontendShipmentsPromise: Promise<FrontendShipmentsResult> | null = null;
@@ -595,14 +569,17 @@ let pendingShipmentMutationCount = 0;
 let queuedRealtimeRefresh = false;
 let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
-async function fetchFrontendShipments(): Promise<FrontendShipmentsResult> {
+function fetchFrontendShipments(): Promise<FrontendShipmentsResult> {
   const profileId = requireBackendValue(useAuthStore.getState().user?.id, 'driver auth profile id');
-  const { activePlanId, allPlans, details } = await fetchAssignedShipmentDetails(profileId);
-  return {
+  return fetchAssignedShipmentDetails(profileId).then(({ activePlanId, allPlans, pendingPlans, details, viewerPlans, viewerDetails, attendedToday }) => ({
     activePlanId,
     allPlans,
+    pendingPlans,
+    attendedToday,
     shipments: details.map((detail) => mapShipment(detail)),
-  };
+    viewerPlans,
+    viewerShipments: viewerDetails.map((detail) => mapShipment(detail)),
+  }));
 }
 
 function clearRealtimeRefreshTimer() {
@@ -664,6 +641,9 @@ export const useDeliveryStore = create<DeliveryState>()(
     (set, get) => ({
       shipments: [],
       allPlans: [],
+      pendingPlans: [],
+      viewerPlans: [],
+      viewerShipments: [],
       activePlanId: null,
       selectedPlanId: null,
       statusFilter: 'all',
@@ -672,6 +652,7 @@ export const useDeliveryStore = create<DeliveryState>()(
       isLoading: false,
       isSavingAction: false,
       error: null,
+      attendedToday: false,
 
       setStatusFilter: (filter) => set({ statusFilter: filter }),
       setSearchQuery: (query) => set({ searchQuery: query }),
@@ -707,35 +688,18 @@ export const useDeliveryStore = create<DeliveryState>()(
       }
       },
 
-      loadShipments: async () => {
+loadShipments: async () => {
         set({ isLoading: true, error: null });
 
-        // If offline, try to serve from IndexedDB cache first
-        if (isOfflineNow()) {
-          const cached = await getCached<FrontendShipmentsResult>('driver-shipments');
-          if (cached) {
-            set({
-              shipments: cached.shipments,
-              allPlans: cached.allPlans,
-              activePlanId: cached.activePlanId,
-              isLoading: false,
-            });
-            return;
-          }
-        }
-
         try {
-          // Always bust the cache so we get fresh data after mutations
+          // Always fetch fresh data from the server; no cache is used.
           frontendShipmentsPromise = fetchFrontendShipments().finally(() => {
             frontendShipmentsPromise = null;
           });
 
           const result = await frontendShipmentsPromise;
 
-          // Cache the result in IndexedDB for offline use
-          await setCache('driver-shipments', result, 30 * 60 * 1000); // 30min TTL
-
-          set({ shipments: result.shipments, allPlans: result.allPlans, activePlanId: result.activePlanId, isLoading: false });
+          set({ shipments: result.shipments, allPlans: result.allPlans, pendingPlans: result.pendingPlans, viewerPlans: result.viewerPlans, viewerShipments: result.viewerShipments, activePlanId: result.activePlanId, attendedToday: result.attendedToday, isLoading: false });
         } catch (error) {
           set({
             isLoading: false,
@@ -1103,7 +1067,12 @@ export const useDeliveryStore = create<DeliveryState>()(
 
       endRoute: async () => {
         const { activePlanId } = get();
-        if (!activePlanId) return;
+        if (!activePlanId) {
+          // Never end silently: refresh so newly assigned work can surface,
+          // then surface a clear error instead of a no-op.
+          await get().loadShipments();
+          throw new Error('لا توجد خطة نشطة لإنهاء خط السير');
+        }
 
         await trackShipmentMutation(
           async () => {
@@ -1119,6 +1088,10 @@ export const useDeliveryStore = create<DeliveryState>()(
           get().loadShipments,
           () => get().isLoading
         );
+
+        // Reflect the finished route server-side immediately; otherwise the UI
+        // keeps showing the stale "delivered" state until a realtime event.
+        await get().loadShipments();
       },
 
       getFilteredShipments: () => {
@@ -1257,18 +1230,6 @@ export const useDeliveryStore = create<DeliveryState>()(
         const nextOpenShipment = routeShipments.find((shipment) => !isTerminalShipment(shipment.status));
         const nextActionableShipmentId = nextOpenShipment?.id ?? null;
         const outOfSequenceShipmentIds = new Set<string>();
-        let hasOpenBefore = false;
-
-        routeShipments.forEach((shipment) => {
-          if (!isTerminalShipment(shipment.status)) {
-            hasOpenBefore = true;
-            return;
-          }
-
-          if (hasOpenBefore) {
-            outOfSequenceShipmentIds.add(shipment.id);
-          }
-        });
 
         return {
           routeShipments,
@@ -1293,9 +1254,6 @@ export const useDeliveryStore = create<DeliveryState>()(
     {
       name: 'horeca-delivery-storage',
       partialize: (state) => ({
-        shipments: state.shipments,
-        allPlans: state.allPlans,
-        activePlanId: state.activePlanId,
         statusFilter: state.statusFilter,
         searchQuery: state.searchQuery,
       }),

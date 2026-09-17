@@ -32,6 +32,7 @@ import {
   englishSizeUnit,
   validateProductContent,
   verifyProductMeaningViaGoogle,
+  pushCodingToOdooTest,
   SIZE_UNITS,
   computeNextCode,
   getCodePrefix,
@@ -255,13 +256,28 @@ export default function ProductCodingPage() {
 
   const upsertMutation = useMutation({
     mutationFn: upsertCodingProduct,
-    onSuccess: (code) => {
+    onSuccess: (code, variables) => {
       invalidate();
       setEditing(null);
       setStatusMessage({
         variant: "success",
         title: "تم الحفظ",
-        message: `تم حفظ التكويد بنجاح (${code})`,
+        message: `تم حفظ التكويد بنجاح (${code}) — جارٍ الإرسال إلى Odoo TEST...`,
+      });
+      pushCodingToOdooTest(variables).then((odooResult) => {
+        if (odooResult.success) {
+          setStatusMessage({
+            variant: "success",
+            title: "تم الحفظ",
+            message: `تم حفظ التكويد (${code}) وإنشاء المنتج في Odoo TEST (ID: ${odooResult.odoo_product_id})`,
+          });
+        } else {
+          setStatusMessage({
+            variant: "warning",
+            title: "تم الحفظ محليًا",
+            message: `تم حفظ التكويد (${code}) لكن فشل الإرسال إلى Odoo TEST: ${odooResult.error}`,
+          });
+        }
       });
     },
     onError: (e) => {
@@ -290,7 +306,7 @@ export default function ProductCodingPage() {
 
   const batchMutation = useMutation({
     mutationFn: applyCodingBatch,
-    onSuccess: (result) => {
+    onSuccess: (result, variables) => {
       invalidate();
       const applied = result.applied ?? 0;
       const errCount = (result.errors ?? []).length;
@@ -299,8 +315,25 @@ export default function ProductCodingPage() {
         title: "نتيجة الاستيراد",
         message: `تم تطبيق ${applied} صف${
           errCount > 0 ? `، بها ${errCount} سطر مرفوض` : ""
-        }`,
+        } — جارٍ الإرسال إلى Odoo TEST...`,
       });
+      if (Array.isArray(variables) && variables.length > 0) {
+        Promise.allSettled(variables.map((row) => pushCodingToOdooTest(row))).then(
+          (results) => {
+            const succeeded = results.filter(
+              (r) => r.status === "fulfilled" && r.value.success
+            ).length;
+            const failed = results.length - succeeded;
+            setStatusMessage({
+              variant: failed > 0 ? "warning" : "success",
+              title: "نتيجة الاستيراد + Odoo",
+              message: `تم تطبيق ${applied} صف، وإرسال ${succeeded} إلى Odoo TEST${
+                failed > 0 ? `، وفشل ${failed}` : ""
+              }`,
+            });
+          }
+        );
+      }
     },
     onError: (e) => {
       setStatusMessage({

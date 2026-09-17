@@ -22,9 +22,11 @@ import {
   TrashIcon,
   TruckIcon,
   UserPlusIcon,
+  UsersIcon,
 } from "@heroicons/react/24/outline";
 import PageMeta from "../../../components/common/PageMeta";
 import LiveTrackingMapSection from "../../../components/admin/LiveTrackingMapSection";
+import DriverAttendanceSection from "../../../components/admin/DriverAttendanceSection";
 import PlanCompletionSection from "../../../components/admin/PlanCompletionSection";
 import DateRangePicker from "../../../components/form/date-range-picker";
 import { AdminEmptyState, AdminMetricCard, AdminMetricGrid, AdminPageFrame, AdminPageHero, AdminSection } from "../../../components/admin/AdminPageElements";
@@ -35,12 +37,14 @@ import type { DateRangeValue } from "../../../lib/date-range";
 import {
   assignPlanDriver,
   createPlanFromOrders,
+  createPlanFromExistingShipments,
   fetchActivePlans,
   fetchAllAssignedShipments,
   fetchDistricts,
   fetchLogisticsDashboard,
   fetchLogisticsDrivers,
   fetchLogisticsPlans,
+  fetchPlanAssignees,
   fetchPlanDetails,
   fetchShipmentCandidates,
   fetchUnassignedShipments,
@@ -48,11 +52,13 @@ import {
   addUnassignedShipmentsToPlan,
   optimizePlan,
   removeShipmentFromPlan,
+  setPlanAssignees,
   setShipmentSequence,
   startDispatcherPreparation,
   tomorrowDate,
   transferShipmentsBetweenPlans,
   updatePlanDate,
+  updatePlanRound,
   updatePlanStatus,
   updateShipmentStatus,
   getValidNextStatuses,
@@ -64,6 +70,8 @@ import {
   type LogisticsShipment,
   type ShipmentCandidate,
   type PlanAuditEvent,
+  type AllShipmentRow,
+  fetchAllShipments,
 } from "../../../lib/logistics-admin";
 
 const PAGE_SIZE = 10;
@@ -389,6 +397,51 @@ function LoadingRows() {
   );
 }
 
+/** Multi-select of drivers the plan is shared with (read-only viewers). */
+function PlanAssigneePicker({
+  drivers,
+  excludedProfileId,
+  value,
+  onChange,
+}: {
+  drivers: LogisticsDriver[];
+  excludedProfileId?: string | null;
+  value: string[];
+  onChange: (profileIds: string[]) => void;
+}) {
+  const selectable = drivers.filter(
+    (driver) => driver.status === "active" && driver.linkedProfileId && driver.linkedProfileId !== excludedProfileId
+  );
+  if (selectable.length === 0) {
+    return <span className="text-xs text-gray-400 dark:text-gray-500">لا يوجد سائقون إضافيون قابلون للإسناد.</span>;
+  }
+  const toggle = (profileId: string) => {
+    onChange(value.includes(profileId) ? value.filter((id) => id !== profileId) : [...value, profileId]);
+  };
+  return (
+    <div className="flex flex-wrap gap-2">
+      {selectable.map((driver) => {
+        const profileId = driver.linkedProfileId as string;
+        const selected = value.includes(profileId);
+        return (
+          <button
+            type="button"
+            key={driver.id}
+            onClick={() => toggle(profileId)}
+            className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+              selected
+                ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                : "border-gray-300 bg-white text-gray-600 hover:bg-brand-25 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+            }`}
+          >
+            {selected ? "✓ " : ""} {driver.name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function PlanCreatePanel({
   selectedCandidates,
   onCreated,
@@ -410,8 +463,16 @@ function PlanCreatePanel({
   const [plannedDate, setPlannedDate] = useState(tomorrowDate());
   const [notes, setNotes] = useState("");
   const [district, setDistrict] = useState("");
+  const [roundNo, setRoundNo] = useState(1);
+  const [assigneeProfileIds, setAssigneeProfileIds] = useState<string[]>([]);
   const mutation = useMutation({
-    mutationFn: () => createPlanFromOrders({ driverId, plannedDate, candidates: selectedCandidates, notes, district: district || undefined }),
+    mutationFn: async () => {
+      const planId = await createPlanFromOrders({ driverId, plannedDate, candidates: selectedCandidates, notes, district: district || undefined, roundNo: roundNo >= 1 ? roundNo : 1 });
+      if (assigneeProfileIds.length > 0) {
+        await setPlanAssignees(planId, assigneeProfileIds);
+      }
+      return planId;
+    },
     onSuccess: (planId) => {
       onCreated?.(planId);
       navigate(`/logistics/plans/draft/${planId}`);
@@ -425,8 +486,9 @@ function PlanCreatePanel({
         event.preventDefault();
         if (canCreate) mutation.mutate();
       }}
-      className="grid gap-3 rounded-2xl border border-gray-200 bg-brand-25/80 p-4 dark:border-gray-800 dark:bg-white/[0.03] lg:grid-cols-[1fr_180px_1.2fr_auto]"
+      className="grid gap-3 rounded-2xl border border-gray-200 bg-brand-25/80 p-4 dark:border-gray-800 dark:bg-white/[0.03]"
     >
+      <div className="grid gap-3 lg:grid-cols-[1fr_180px_1.2fr_auto]">
       <label className="grid gap-1.5">
         <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">السائق</span>
         <select
@@ -465,6 +527,17 @@ function PlanCreatePanel({
         </select>
       </label>
       <label className="grid gap-1.5">
+        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">رقم الشوط</span>
+        <input
+          type="number"
+          min={1}
+          step={1}
+          value={roundNo}
+          onChange={(event) => setRoundNo(Math.max(1, Number(event.target.value) || 1))}
+          className="h-11 rounded-xl border border-gray-300 bg-white px-4 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+        />
+      </label>
+      <label className="grid gap-1.5">
         <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">ملاحظات الخطة</span>
         <input
           value={notes}
@@ -478,6 +551,13 @@ function PlanCreatePanel({
           <PlusIcon className="h-4 w-4" />
           {mutation.isPending ? "جاري الإنشاء" : `إنشاء خطة (${selectedCandidates.length})`}
         </ToolbarButton>
+      </div>
+      </div>
+      <div className="grid gap-2 border-t border-gray-200 pt-3 dark:border-gray-800">
+        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+          اسناد الخطة (عرض لأشخاص إضافيين) — بنفس خطة السائق الأساسي وبدون تحكم
+        </span>
+        <PlanAssigneePicker drivers={drivers} excludedProfileId={drivers.find((d) => d.id === driverId)?.linkedProfileId} value={assigneeProfileIds} onChange={setAssigneeProfileIds} />
       </div>
       <ErrorNotice message={mutation.error instanceof Error ? mutation.error.message : null} />
     </form>
@@ -692,7 +772,7 @@ export function LogisticsOverviewPage() {
           description="نظرة عملية على الخطط والشحنات والسائقين، مع إبراز ما يحتاج قرارًا سريعًا."
           actions={
             <>
-              <Link to="/logistics/shipments"><ToolbarButton variant="outline"><ClipboardDocumentListIcon className="h-4 w-4" />تخطيط الشحنات</ToolbarButton></Link>
+              <Link to="/logistics/plans/new"><ToolbarButton variant="outline"><ClipboardDocumentListIcon className="h-4 w-4" />تخطيط الشحنات</ToolbarButton></Link>
               <Link to="/logistics/plans/new"><ToolbarButton variant="primary"><PlusIcon className="h-4 w-4" />خطة جديدة</ToolbarButton></Link>
             </>
           }
@@ -711,6 +791,7 @@ export function LogisticsOverviewPage() {
           <AdminMetricCard label="نسبة التسليم" value={`${shipments.length ? Math.round((delivered / shipments.length) * 100) : 0}%`} helper="من إجمالي الشحنات" tone="emerald" />
         </AdminMetricGrid>
         <LiveTrackingMapSection className="mt-6" />
+        <DriverAttendanceSection className="mt-6" />
         <PlanCompletionSection className="mt-6" />
         <div className="mt-6 grid grid-cols-1 gap-6 2xl:grid-cols-[1.4fr_0.8fr]">
           <DriverOverviewTable drivers={drivers} isLoading={isLoading} />
@@ -816,31 +897,409 @@ function RecentActivity({ activities }: { activities: Array<{ id: string; title:
   );
 }
 
+function QuickCreatePlanPanel({
+  shipmentIds,
+  onDone,
+  onClose,
+}: {
+  shipmentIds: string[];
+  onDone: () => void;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const { data: drivers = [] } = useQuery({ queryKey: [...ROOT_QUERY, "drivers"], queryFn: fetchLogisticsDrivers });
+  const { data: districts = [] } = useQuery({ queryKey: [...ROOT_QUERY, "districts"], queryFn: fetchDistricts });
+  const [driverId, setDriverId] = useState("");
+  const [plannedDate, setPlannedDate] = useState(tomorrowDate());
+  const [notes, setNotes] = useState("");
+  const [district, setDistrict] = useState("");
+  const [roundNo, setRoundNo] = useState(1);
+  const [error, setError] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      if (!driverId) throw new Error("اختر السائق.");
+      if (shipmentIds.length === 0) throw new Error("لا توجد شحنات محددة.");
+      return createPlanFromExistingShipments({
+        driverId,
+        plannedDate,
+        shipmentIds,
+        notes: notes || undefined,
+        district: district || undefined,
+        roundNo,
+      });
+    },
+    onSuccess: async (planId) => {
+      await queryClient.invalidateQueries({ queryKey: ROOT_QUERY });
+      onDone();
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-lg dark:bg-gray-900 dark:border-gray-800 border border-gray-200">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">إنشاء خطة جديدة</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{shipmentIds.length} شحنة ستُضاف للخطة</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-white/[0.05] dark:hover:text-gray-300">✕</button>
+        </div>
+        <form onSubmit={(event) => { event.preventDefault(); setError(null); mutation.mutate(); }} className="p-6 grid gap-4">
+          {error ? <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{error}</div> : null}
+          <label className="grid gap-1.5">
+            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">السائق *</span>
+            <select value={driverId} onChange={(event) => setDriverId(event.target.value)} className="h-11 rounded-xl border border-gray-300 bg-white px-4 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white">
+              <option value="">اختر السائق</option>
+              {drivers.filter((d) => d.status === "active").map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="grid gap-1.5">
+              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">تاريخ التسليم *</span>
+              <input type="date" value={plannedDate} onChange={(event) => setPlannedDate(event.target.value)} className="h-11 rounded-xl border border-gray-300 bg-white px-4 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+            </label>
+            <label className="grid gap-1.5">
+              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">رقم الشوط</span>
+              <input type="number" min={1} value={roundNo} onChange={(event) => setRoundNo(Math.max(1, Number(event.target.value) || 1))} className="h-11 rounded-xl border border-gray-300 bg-white px-4 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+            </label>
+          </div>
+          <label className="grid gap-1.5">
+            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">المنطقة</span>
+            <select value={district} onChange={(event) => setDistrict(event.target.value)} className="h-11 rounded-xl border border-gray-300 bg-white px-4 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white">
+              <option value="">اختر المنطقة</option>
+              {districts.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </label>
+          <label className="grid gap-1.5">
+            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">ملاحظات</span>
+            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} className="rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+          </label>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="h-11 rounded-xl border border-gray-200 px-5 text-sm font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.04]">إلغاء</button>
+            <button type="submit" disabled={mutation.isPending || !driverId} className="h-11 rounded-xl bg-brand-500 px-6 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:opacity-50">
+              {mutation.isPending ? "جاري الإنشاء..." : "إنشاء وربط"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AddToPlanModal({
+  shipmentIds,
+  onClose,
+  onTransferred,
+}: {
+  shipmentIds: string[];
+  onClose: () => void;
+  onTransferred: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const { data: activePlans = [] } = useQuery({
+    queryKey: [...ROOT_QUERY, "activePlansForTransfer"],
+    queryFn: () => fetchActivePlans(),
+  });
+  const [targetPlanId, setTargetPlanId] = useState("");
+  const [confirmStep, setConfirmStep] = useState(false);
+
+  const transferMutation = useMutation({
+    mutationFn: async () => {
+      if (!targetPlanId) throw new Error("اختر الخطة المستهدفة.");
+      return addUnassignedShipmentsToPlan(shipmentIds, targetPlanId);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ROOT_QUERY });
+      setTargetPlanId("");
+      setConfirmStep(false);
+      onTransferred();
+      onClose();
+    },
+  });
+
+  const targetPlan = activePlans.find((p) => p.id === targetPlanId);
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-lg dark:bg-gray-900 dark:border-gray-800 border border-gray-200">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">إضافة لخطة موجودة</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{shipmentIds.length} شحنة ستُضاف للخطة المختارة</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-white/[0.05] dark:hover:text-gray-300">✕</button>
+        </div>
+        <div className="p-6 grid gap-4">
+          {activePlans.length === 0 ? (
+            <div className="text-center text-sm text-gray-500 dark:text-gray-400 py-6">لا توجد خطط نشطة. أنشئ خطة جديدة أولًا.</div>
+          ) : (
+            <>
+              <label className="grid gap-1.5">
+                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">اختر الخطة</span>
+                <select value={targetPlanId} onChange={(event) => { setTargetPlanId(event.target.value); setConfirmStep(false); }} className="h-11 rounded-xl border border-gray-300 bg-white px-4 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white">
+                  <option value="">اختر خطة...</option>
+                  {activePlans.map((plan) => (
+                    <option key={plan.id} value={plan.id}>{formatPlanDisplayName(plan)} — {PLAN_STATUS_LABELS[plan.status] ?? plan.status}</option>
+                  ))}
+                </select>
+              </label>
+              {targetPlan && !confirmStep ? (
+                <button type="button" onClick={() => setConfirmStep(true)} className="h-11 rounded-xl bg-brand-500 px-5 text-sm font-semibold text-white transition hover:bg-brand-600">تأكيد الإضافة</button>
+              ) : null}
+              {confirmStep ? (
+                <div className="rounded-xl bg-brand-25/80 p-4 text-sm text-gray-700 dark:bg-white/[0.03] dark:text-gray-300">
+                  <p>ستُضاف <strong>{shipmentIds.length}</strong> شحنة إلى خطة <strong>{formatPlanDisplayName(targetPlan!)}</strong>.</p>
+                  <div className="mt-4 flex justify-end gap-3">
+                    <button type="button" onClick={() => setConfirmStep(false)} className="h-9 rounded-lg border border-gray-200 px-4 text-sm font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">رجوع</button>
+                    <button type="button" onClick={() => transferMutation.mutate()} disabled={transferMutation.isPending} className="h-9 rounded-lg bg-brand-500 px-5 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:opacity-50">
+                      {transferMutation.isPending ? "جاري الإضافة..." : "تأكيد"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function LogisticsShipmentsPage() {
+  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState("all");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(tomorrowRange);
+  const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [planMode, setPlanMode] = useState<"idle" | "new-plan" | "transfer">("idle");
+  const [showPlanPanel, setShowPlanPanel] = useState(false);
+  const query = useQuery({ queryKey: [...ROOT_QUERY, "all-shipments", dateRange[0]?.toISOString(), dateRange[1]?.toISOString()], queryFn: () => fetchAllShipments(dateRange), refetchInterval: 15000 });
+
+  const filtered = (query.data ?? [])
+    .filter((row) => includesSearch([row.reference, row.customerName, row.warehouseName, row.driverName, row.shipmentStatus, row.planReference, row.planStatus], search))
+    .filter((row) => {
+      const status = row.shipmentStatus;
+      if (tab === "all") return true;
+      if (tab === "delivered") return ["DELIVERED", "FINISHED", "SETTLED"].includes(String(status));
+      if (tab === "inflight") return ["ASSIGNED", "CHECK_IN", "PICKUP", "OUT_FOR_DELIVERY", "ARRIVED"].includes(String(status));
+      if (tab === "unplanned") return !row.planId && !["DELIVERED", "FINISHED", "SETTLED", "CANCELLED"].includes(String(status));
+      if (tab === "cancelled") return status === "CANCELLED";
+      return true;
+    });
+
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const selectableRows = filtered.filter((row) => !row.planId && !["DELIVERED", "FINISHED", "SETTLED", "CANCELLED"].includes(String(row.shipmentStatus)));
+  const allSelectableOnPage = selectableRows.filter((row) => pageRows.some((p) => p.id === row.id));
+  const allPageSelected = allSelectableOnPage.length > 0 && allSelectableOnPage.every((row) => selected.includes(row.id));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const newIds = allSelectableOnPage.map((r) => r.id);
+      setSelected((prev) => [...new Set([...prev, ...newIds])]);
+    } else {
+      const pageIds = allSelectableOnPage.map((r) => r.id);
+      setSelected((prev) => prev.filter((id) => !pageIds.includes(id)));
+    }
+  };
+
+  const handleSelectRow = (id: string, checked: boolean) => {
+    setSelected((prev) => checked ? [...prev, id] : prev.filter((i) => i !== id));
+  };
+
+  return (
+    <>
+      <PageMeta title="اللوجستيات | الشحنات" description="كل الشحنات وحالاتها" />
+      <AdminPageFrame dir="rtl">
+        <AdminPageHero
+          eyebrow="All Shipments"
+          title="كل الشحنات"
+          description="تابع حالة كل شحنة حسب تاريخ التصليم: خضراء = مسلّمة، زرقاء = في خطة، حمراء = لم تُخطط بعد."
+          actions={
+            <Link to="/logistics/plans/new"><ToolbarButton variant="primary"><PlusIcon className="h-4 w-4" />خطة جديدة</ToolbarButton></Link>
+          }
+        />
+        <ErrorNotice message={query.error instanceof Error ? query.error.message : null} />
+        <AdminSection
+          title="قائمة الشحنات"
+          description="تصفية حسب تاريخ التسليم أو الحالة أو البحث بالاسم/الرقم/المستودع/السائق."
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <SearchBox value={search} onChange={setSearch} placeholder="بحث بالرقم/العميل/المستودع/السائق" />
+              <select
+                value={tab}
+                onChange={(event) => { setTab(event.target.value); setPage(1); setSelected([]); }}
+                className="h-11 rounded-xl border border-gray-300 bg-white px-4 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+              >
+                <option value="all">كل حالات الشحنة</option>
+                <option value="delivered">مسلّمة</option>
+                <option value="inflight">في خطة / جارية</option>
+                <option value="unplanned">لم تُخطط بعد</option>
+                <option value="cancelled">ملغاة</option>
+              </select>
+            </div>
+          }
+        >
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <div className="flex gap-2">
+              {([
+                { range: null as DateRangeValue | null, label: "الكل" },
+                { range: todayRange(), label: "اليوم" },
+                { range: tomorrowRange(), label: "غدًا" },
+                { range: nextNDaysRange(7), label: "الـ 7 أيام" },
+                { range: nextNDaysRange(30), label: "الـ 30 يوم" },
+              ]).map((item) => {
+                const isActive = item.range === null ? dateRange[0] === null && dateRange[1] === null : dateRange[0]?.getTime() === item.range[0]?.getTime() && dateRange[1]?.getTime() === item.range[1]?.getTime();
+                return (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => { setDateRange(item.range ?? [null, null]); setPage(1); }}
+                    className={`h-9 rounded-full px-4 text-sm font-medium transition ${isActive ? "bg-brand-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-white/[0.04] dark:text-gray-300 dark:hover:bg-white/[0.08]"}`}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+            <span className="ms-auto inline-flex items-center text-sm font-medium text-gray-500 dark:text-gray-400">{filtered.length.toLocaleString("ar-EG")} شحنة</span>
+          </div>
+
+          {query.isLoading ? <LoadingRows /> : pageRows.length === 0 ? (
+            <AdminEmptyState title="لا توجد شحنات مطابقة" description="جرّب تعديل البحث أو التصفية." icon={<ClipboardDocumentListIcon className="h-6 w-6" />} />
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-right text-sm" dir="rtl">
+                  <thead className="border-b border-gray-200 bg-brand-25/80 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02]">
+                    <tr>
+                      {tab === "unplanned" ? (
+                        <th className="w-12 px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={allPageSelected}
+                            disabled={allSelectableOnPage.length === 0}
+                            onChange={(event) => handleSelectAll(event.target.checked)}
+                            className="h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20 disabled:opacity-40"
+                          />
+                        </th>
+                      ) : null}
+                      <th className="px-4 py-3">الشحنة</th>
+                      <th className="px-4 py-3">العميل</th>
+                      <th className="px-4 py-3">تاريخ التسليم</th>
+                      <th className="px-4 py-3">المستودع</th>
+                      <th className="px-4 py-3">القيمة</th>
+                      <th className="px-4 py-3">السائق</th>
+                      <th className="px-4 py-3">حالة الشحنة</th>
+                      <th className="px-4 py-3">الخطة</th>
+                      <th className="px-4 py-3">عرض</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                    {pageRows.map((row) => {
+                      const status = shipmentStatusInfo(String(row.shipmentStatus ?? "PENDING_ASSIGN"));
+                      const planBadge = row.planId
+                        ? { label: row.planReference || "ضمن خطة", tone: "blue" as StatusBadgeTone }
+                        : { label: "غير مخطط", tone: "red" as StatusBadgeTone };
+                      const isSelectable = !row.planId && !["DELIVERED", "FINISHED", "SETTLED", "CANCELLED"].includes(String(row.shipmentStatus));
+                      return (
+                        <tr key={row.id} className="bg-white hover:bg-brand-25 dark:bg-transparent dark:hover:bg-white/[0.02]">
+                          {tab === "unplanned" ? (
+                            <td className="px-4 py-4 text-center">
+                              {isSelectable ? (
+                                <input
+                                  type="checkbox"
+                                  checked={selected.includes(row.id)}
+                                  onChange={(event) => handleSelectRow(row.id, event.target.checked)}
+                                  className="h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20"
+                                />
+                              ) : null}
+                            </td>
+                          ) : null}
+                          <td className="px-4 py-4 font-semibold text-gray-900 dark:text-white" dir="ltr">{row.reference}</td>
+                          <td className="px-4 py-4"><div className="flex items-center gap-3"><CustomerAvatar name={row.customerName ?? "عميل"} size="sm" /><span>{row.customerName ?? "--"}</span></div></td>
+                          <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{formatDate(row.deliveryDate)}</td>
+                          <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{row.warehouseName ?? "--"}</td>
+                          <td className="px-4 py-4 font-semibold">{row.totalGmv != null ? formatMoney(row.totalGmv) : "--"}</td>
+                          <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{row.driverName ?? "--"}</td>
+                          <td className="px-4 py-4"><StatusBadge label={status.label} tone={status.tone} dot /></td>
+                          <td className="px-4 py-4">{row.planId ? <StatusBadge label={planBadge.label} tone={planBadge.tone} dot /> : <StatusBadge label="غير مخطط" tone="red" dot />}</td>
+                          <td className="px-4 py-4">
+                            <Link to={`/logistics/shipments/${row.id}`} className="inline-flex items-center gap-1.5 rounded-lg bg-brand-25 px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-brand-25 dark:bg-white/[0.02] dark:text-gray-300">
+                              <EyeIcon className="h-3.5 w-3.5" />
+                              تفاصيل
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {totalPages > 1 ? (
+                <div className="mt-4 flex items-center justify-between">
+                  <button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300">السابق</button>
+                  <span className="text-sm text-gray-500 dark:text-gray-400">صفحة {page} من {totalPages}</span>
+                  <button type="button" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300">التالي</button>
+                </div>
+              ) : null}
+            </>
+          )}
+        </AdminSection>
+
+        {selected.length > 0 ? (
+          <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-2xl border border-gray-200 bg-white px-6 py-4 shadow-2xl dark:border-gray-700 dark:bg-gray-900">
+            <div className="flex items-center gap-4">
+              <span className="text-sm font-semibold text-gray-900 dark:text-white">{selected.length} شحنة محددة</span>
+              <button type="button" onClick={() => setSelected([])} className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">مسح التحديد</button>
+              <div className="me-4 flex gap-2">
+                <button type="button" onClick={() => setShowPlanPanel(true)} className="h-10 rounded-xl bg-brand-500 px-5 text-sm font-semibold text-white transition hover:bg-brand-600">إنشاء خطة جديدة</button>
+                <button type="button" onClick={() => setPlanMode("transfer")} className="h-10 rounded-xl border border-brand-300 bg-white px-5 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 dark:border-brand-700 dark:bg-transparent dark:text-brand-300 dark:hover:bg-brand-950">إضافة لخطة موجودة</button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {showPlanPanel ? (
+          <QuickCreatePlanPanel shipmentIds={selected} onDone={() => { setSelected([]); setShowPlanPanel(false); query.refetch(); }} onClose={() => setShowPlanPanel(false)} />
+        ) : null}
+
+        {planMode === "transfer" ? (
+          <AddToPlanModal shipmentIds={selected} onClose={() => setPlanMode("idle")} onTransferred={() => { setSelected([]); setPlanMode("idle"); query.refetch(); }} />
+        ) : null}
+      </AdminPageFrame>
+    </>
+  );
+}
+
+
+
+export function LogisticsNewPlanPage() {
   const [dateRange, setDateRange] = useState<DateRangeValue>(tomorrowRange);
   const [selected, setSelected] = useState<string[]>([]);
   const [transferOpen, setTransferOpen] = useState(false);
-  const query = useQuery({ queryKey: [...ROOT_QUERY, "shipment-candidates", dateRange[0]?.toISOString(), dateRange[1]?.toISOString()], queryFn: () => fetchShipmentCandidates(dateRange) });
+  const query = useQuery({ queryKey: [...ROOT_QUERY, "new-plan-candidates", dateRange[0]?.toISOString(), dateRange[1]?.toISOString()], queryFn: () => fetchShipmentCandidates(dateRange) });
   const selectedCandidates = useMemo(
     () => (query.data ?? []).filter((candidate) => selected.includes(candidate.orderId)),
     [query.data, selected],
   );
   return (
     <>
-      <PageMeta title="اللوجستيات | الشحنات" description="مصدر تخطيط الشحنات حسب تاريخ التسليم" />
+      <PageMeta title="اللوجستيات | خطة جديدة" description="إنشاء خطة لوجستية جديدة" />
       <AdminPageFrame dir="rtl">
-        <AdminPageHero eyebrow="Delivery Date Planning" title="الشحنات" description="اختر تاريخ التسليم المطلوب ثم كوّن خطة تشغيلية من الشحنات المتاحة." actions={
+        <AdminPageHero eyebrow="New Plan" title="إنشاء خطة جديدة" description="فلتر الشحنات حسب تاريخ التسليم، اختر السائق، ثم تابع إلى مساحة التخطيط." actions={
           <>
             <ToolbarButton onClick={() => setTransferOpen(true)}>
               <ArrowPathIcon className="h-4 w-4" />
               نقل / إضافة شحنات
             </ToolbarButton>
-            <Link to="/logistics/plans/new"><ToolbarButton variant="primary"><PlusIcon className="h-4 w-4" />خطة جديدة</ToolbarButton></Link>
           </>
         } />
         <AdminSection
-          title="تصفية حسب تاريخ التسليم"
-          description="الافتراضي هو غدًا لأن التخطيط يتم قبل يوم التسليم."
+          title="تاريخ التسليم"
+          description="كل المرشحات والنتائج تعتمد على تاريخ الالتزام."
           actions={
             <div className="flex flex-wrap gap-2">
               <button
@@ -881,11 +1340,11 @@ export function LogisticsShipmentsPage() {
             </div>
           }
         >
-          <div className="max-w-md"><DateRangePicker id="logistics-shipments-range" label="تاريخ التسليم" placeholder="اختر تاريخ التسليم" value={dateRange} onChange={setDateRange} /></div>
+          <div className="max-w-md"><DateRangePicker id="logistics-new-plan-range" label="تاريخ التسليم" placeholder="اختر تاريخ التسليم" value={dateRange} onChange={setDateRange} /></div>
         </AdminSection>
         <ErrorNotice message={query.error instanceof Error ? query.error.message : null} />
-        {selected.length > 0 ? <PlanCreatePanel selectedCandidates={selectedCandidates} /> : null}
-        <ShipmentCandidateTable rows={query.data ?? []} isLoading={query.isLoading} selected={selected} onSelectedChange={setSelected} />
+        <PlanCreatePanel selectedCandidates={selectedCandidates} />
+        <ShipmentCandidateTable rows={query.data ?? []} isLoading={query.isLoading} selected={selected} onSelectedChange={setSelected} planningMode />
         <ShipmentTransferModal
           open={transferOpen}
           onClose={() => setTransferOpen(false)}
@@ -898,31 +1357,7 @@ export function LogisticsShipmentsPage() {
   );
 }
 
-export function LogisticsNewPlanPage() {
-  const [dateRange, setDateRange] = useState<DateRangeValue>(tomorrowRange);
-  const [selected, setSelected] = useState<string[]>([]);
-  const query = useQuery({ queryKey: [...ROOT_QUERY, "new-plan-candidates", dateRange[0]?.toISOString(), dateRange[1]?.toISOString()], queryFn: () => fetchShipmentCandidates(dateRange) });
-  const selectedCandidates = useMemo(
-    () => (query.data ?? []).filter((candidate) => selected.includes(candidate.orderId)),
-    [query.data, selected],
-  );
-  return (
-    <>
-      <PageMeta title="اللوجستيات | خطة جديدة" description="إنشاء خطة لوجستية جديدة" />
-      <AdminPageFrame dir="rtl">
-        <AdminPageHero eyebrow="New Plan" title="إنشاء خطة جديدة" description="فلتر الشحنات حسب تاريخ التسليم، اختر السائق، ثم تابع إلى مساحة التخطيط." />
-        <AdminSection title="تاريخ التسليم" description="كل المرشحات والنتائج تعتمد على تاريخ الالتزام.">
-          <div className="max-w-md"><DateRangePicker id="logistics-new-plan-range" label="تاريخ التسليم" placeholder="اختر تاريخ التسليم" value={dateRange} onChange={setDateRange} /></div>
-        </AdminSection>
-        <ErrorNotice message={query.error instanceof Error ? query.error.message : null} />
-        <PlanCreatePanel selectedCandidates={selectedCandidates} />
-        <ShipmentCandidateTable rows={query.data ?? []} isLoading={query.isLoading} selected={selected} onSelectedChange={setSelected} planningMode />
-      </AdminPageFrame>
-    </>
-  );
-}
-
-type PlanColumn = "select" | "reference" | "date" | "driver" | "district" | "shipments" | "status" | "distance" | "created";
+type PlanColumn = "select" | "reference" | "date" | "driver" | "codrivers" | "district" | "shipments" | "status" | "distance" | "created";
 
 export function LogisticsPlansPage() {
   const queryClient = useQueryClient();
@@ -930,7 +1365,7 @@ export function LogisticsPlansPage() {
   const [tab, setTab] = useState("all");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string[]>([]);
-  const [visible, setVisible] = useState<Record<PlanColumn, boolean>>({ select: true, reference: true, date: true, driver: true, district: true, shipments: true, status: true, distance: true, created: true });
+  const [visible, setVisible] = useState<Record<PlanColumn, boolean>>({ select: true, reference: true, date: true, driver: true, codrivers: true, district: true, shipments: true, status: true, distance: true, created: true });
   const { sort: planSort, toggle: planToggle, sorted: planSorted } = useSort({ key: "date", direction: "desc" });
   const query = useQuery({ queryKey: [...ROOT_QUERY, "plans"], queryFn: fetchLogisticsPlans });
   const driversQuery = useQuery({ queryKey: [...ROOT_QUERY, "drivers"], queryFn: fetchLogisticsDrivers, refetchInterval: 10000 });
@@ -961,6 +1396,7 @@ export function LogisticsPlansPage() {
     reference: (r) => r.reference,
     date: (r) => r.plannedDate ?? "",
     driver: (r) => r.driverName ?? "",
+    codrivers: (r) => (r.coDrivers ?? []).map((c) => c.displayName ?? "").join(","),
     district: (r) => r.district ?? "",
     shipments: (r) => r.shipmentCount ?? 0,
     status: (r) => r.status,
@@ -980,7 +1416,7 @@ export function LogisticsPlansPage() {
           actions={
             <div className="flex flex-wrap gap-2">
               <SearchBox value={search} onChange={setSearch} placeholder="بحث في الخطط" />
-              <ColumnVisibility columns={[{ key: "reference", label: "الخطة" }, { key: "date", label: "التاريخ" }, { key: "driver", label: "السائق" }, { key: "district", label: "المنطقة" }, { key: "shipments", label: "الشحنات" }, { key: "status", label: "الحالة" }, { key: "distance", label: "المسافة" }, { key: "created", label: "الإنشاء" }]} visible={visible} onToggle={(key) => setVisible((current) => ({ ...current, [key]: !current[key] }))} />
+              <ColumnVisibility columns={[{ key: "reference", label: "الخطة" }, { key: "date", label: "التاريخ" }, { key: "driver", label: "السائق الأساسي" }, { key: "codrivers", label: "مشاركون (co-driver)" }, { key: "district", label: "المنطقة" }, { key: "shipments", label: "الشحنات" }, { key: "status", label: "الحالة" }, { key: "distance", label: "المسافة" }, { key: "created", label: "الإنشاء" }]} visible={visible} onToggle={(key) => setVisible((current) => ({ ...current, [key]: !current[key] }))} />
               <ToolbarButton disabled={selected.length === 0 || bulkOptimize.isPending} onClick={() => bulkOptimize.mutate()}><RocketLaunchIcon className="h-4 w-4" />تحسين المحدد</ToolbarButton>
             </div>
           }
@@ -999,7 +1435,8 @@ export function LogisticsPlansPage() {
                       {visible.select ? <th className="w-12 px-4 py-3"></th> : null}
                       {visible.reference ? <SortableTh label="الخطة" sortKey="reference" sort={planSort} toggle={planToggle} /> : null}
                       {visible.date ? <SortableTh label="تاريخ التسليم" sortKey="date" sort={planSort} toggle={planToggle} /> : null}
-                      {visible.driver ? <SortableTh label="السائق" sortKey="driver" sort={planSort} toggle={planToggle} /> : null}
+                      {visible.driver ? <SortableTh label="السائق الأساسي" sortKey="driver" sort={planSort} toggle={planToggle} /> : null}
+                      {visible.codrivers ? <SortableTh label="مشاركون (co-driver)" sortKey="driver" sort={planSort} toggle={planToggle} /> : null}
                       {visible.district ? <SortableTh label="المنطقة" sortKey="district" sort={planSort} toggle={planToggle} /> : null}
                       {visible.shipments ? <SortableTh label="الشحنات" sortKey="shipments" sort={planSort} toggle={planToggle} /> : null}
                       {visible.status ? <SortableTh label="الحالة" sortKey="status" sort={planSort} toggle={planToggle} /> : null}
@@ -1014,9 +1451,25 @@ export function LogisticsPlansPage() {
                       return (
                         <tr key={plan.id}>
                           {visible.select ? <td className="px-4 py-4"><input type="checkbox" checked={selected.includes(plan.id)} onChange={(event) => setSelected(event.target.checked ? [...selected, plan.id] : selected.filter((id) => id !== plan.id))} /></td> : null}
-                          {visible.reference ? <td className="px-4 py-4"><p className="font-semibold text-gray-900 dark:text-white">{formatPlanDisplayName(plan, drivers)}</p><p className="mt-0.5 text-[11px] text-gray-400" dir="ltr">{plan.reference}</p></td> : null}
+                          {visible.reference ? <td className="px-4 py-4"><div className="flex items-center gap-2"><span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-white/10 dark:text-slate-300" title="رقم الشوط">الشوط {plan.roundNo}</span><p className="font-semibold text-gray-900 dark:text-white">{formatPlanDisplayName(plan, drivers)}</p></div><p className="mt-0.5 text-[11px] text-gray-400" dir="ltr">{plan.reference}</p></td> : null}
                           {visible.date ? <td className="px-4 py-4">{formatDate(plan.plannedDate)}</td> : null}
                           {visible.driver ? <td className="px-4 py-4">{plan.driverName ?? "بدون سائق"}</td> : null}
+                          {visible.codrivers ? (
+                            <td className="px-4 py-4">
+                              {(plan.coDrivers ?? []).length === 0 ? (
+                                <span className="text-xs text-gray-400">—</span>
+                              ) : (
+                                <div className="flex flex-wrap gap-1">
+                                  {(plan.coDrivers ?? []).map((co) => (
+                                    <span key={co.profileId} className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:ring-amber-800" title="مشارك (co-driver)">
+                                      <UsersIcon className="h-3 w-3" />
+                                      {co.displayName ?? "سائق"}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                          ) : null}
                           {visible.district ? <td className="px-4 py-4">{plan.district ?? "—"}</td> : null}
                           {visible.shipments ? <td className="px-4 py-4">{plan.shipmentCount}</td> : null}
                           {visible.status ? <td className="px-4 py-4"><StatusBadge label={status.label} tone={status.tone} />{plan.status === "not_executed" && (() => { const reason = notExecutedReasonLabel(plan.notExecutedReason); return reason ? <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{reason}</p> : null; })()}</td> : null}
@@ -1131,8 +1584,8 @@ function ShipmentTransferModal({
   const [confirmStep, setConfirmStep] = useState(false);
 
   const activePlansQuery = useQuery({
-    queryKey: [...ROOT_QUERY, "activePlans"],
-    queryFn: () => fetchActivePlans(sourcePlan?.id),
+    queryKey: [...ROOT_QUERY, "activePlans", mode, sourcePlan?.id ?? "none"],
+    queryFn: () => fetchActivePlans(mode === "transfer" ? sourcePlan?.id : undefined),
     enabled: open,
   });
   const activePlans = activePlansQuery.data ?? [];
@@ -1216,7 +1669,7 @@ function ShipmentTransferModal({
             نقل من الخطة
           </button>
           <button
-            onClick={() => { setMode("add"); setSelectedIds([]); setTargetPlanId(""); setConfirmStep(false); }}
+            onClick={() => { setMode("add"); setSelectedIds([]); setTargetPlanId((prev) => prev || sourcePlan?.id || ""); setConfirmStep(false); }}
             className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
               mode === "add" ? "bg-emerald-600 text-white" : "bg-brand-25 text-gray-600 hover:bg-brand-25 dark:bg-white/[0.02] dark:text-gray-300"
             }`}
@@ -1428,6 +1881,10 @@ export function LogisticsDraftPlanPage() {
   const audit = query.data?.audit ?? [];
   const [driverId, setDriverId] = useState("");
   const [plannedDate, setPlannedDate] = useState("");
+  const [roundNo, setRoundNo] = useState<number | null>(null);
+  useEffect(() => {
+    if (plan && roundNo === null) setRoundNo(plan.roundNo);
+  }, [plan, roundNo]);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const { sort: shipmentSort, toggle: shipmentToggle, sorted: shipmentSorted } = useSort(null);
@@ -1461,6 +1918,14 @@ export function LogisticsDraftPlanPage() {
   });
   const removeShipment = useMutation({ mutationFn: removeShipmentFromPlan, onSuccess: refresh });
   const resequence = useMutation({ mutationFn: ({ shipmentId, sequence }: { shipmentId: string; sequence: number }) => setShipmentSequence(planId, shipmentId, sequence), onSuccess: refresh });
+  const updateRound = useMutation({
+    mutationFn: () => {
+      if (!plan) throw new Error("الخطة غير موجودة.");
+      if (!roundNo || roundNo < 1) throw new Error("رقم الشوط يجب أن يكون 1 على الأقل.");
+      return updatePlanRound(plan.id, roundNo);
+    },
+    onSuccess: refresh,
+  });
   const changePlanStatus = useMutation({
     mutationFn: ({ newStatus, reason }: { newStatus: string; reason?: string }) => updatePlanStatus(planId, newStatus, reason),
     onSuccess: refresh,
@@ -1472,7 +1937,26 @@ export function LogisticsDraftPlanPage() {
   const [statusConfirmOpen, setStatusConfirmOpen] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<string>("");
   const [statusReason, setStatusReason] = useState("");
-  const mutationError = [optimize.error, confirm.error, assignDriver.error, updateDate.error, removeShipment.error, resequence.error, changePlanStatus.error, changeShipmentStatus.error].find(Boolean);
+  const assigneesQuery = useQuery({
+    queryKey: [...ROOT_QUERY, "plan", planId, "assignees"],
+    queryFn: () => fetchPlanAssignees(planId),
+    enabled: Boolean(planId),
+  });
+  const [assigneeProfileIds, setAssigneeProfileIds] = useState<string[]>([]);
+  useEffect(() => {
+    const current = assigneesQuery.data ?? [];
+    if (current.length > 0) {
+      setAssigneeProfileIds((prev) => (prev.length > 0 ? prev : current.map((item) => item.profileId)));
+    }
+  }, [assigneesQuery.data]);
+  const setAssignees = useMutation({
+    mutationFn: () => setPlanAssignees(planId, assigneeProfileIds),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: [...ROOT_QUERY, "plan", planId, "assignees"] });
+      await refresh();
+    },
+  });
+  const mutationError = [optimize.error, confirm.error, assignDriver.error, updateDate.error, updateRound.error, removeShipment.error, resequence.error, changePlanStatus.error, changeShipmentStatus.error, setAssignees.error].find(Boolean);
 
   if (query.isLoading) {
     return <AdminPageFrame dir="rtl"><LoadingRows /></AdminPageFrame>;
@@ -1503,6 +1987,7 @@ export function LogisticsDraftPlanPage() {
           meta={
             <div className="flex items-center gap-3">
               <StatusBadge label={status.label} tone={status.tone} />
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600 dark:bg-white/10 dark:text-slate-300">الشوط {plan.roundNo}</span>
               {plan.status === "not_executed" && (() => { const reason = notExecutedReasonLabel(plan.notExecutedReason); return reason ? <span className="text-sm font-medium text-red-600 dark:text-red-400">{reason}</span> : null; })()}
             </div>
           }
@@ -1561,6 +2046,51 @@ export function LogisticsDraftPlanPage() {
             </div>
           </AdminSection>
         </div>
+        <AdminSection
+          title="رقم الشوط"
+          description="ترتيب الخطة ضمن أشواط السائق. الشوط التالي لا يُبدأ قبل إتمام كل خطط الشوط السابق."
+        >
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={roundNo ?? plan.roundNo}
+              onChange={(event) => setRoundNo(Math.max(1, Number(event.target.value) || 1))}
+              className="h-11 w-32 rounded-xl border border-gray-300 bg-white px-4 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+            />
+            <ToolbarButton onClick={() => updateRound.mutate()} disabled={updateRound.isPending || roundNo === null || roundNo === plan.roundNo}>
+              حفظ الشوط
+            </ToolbarButton>
+          </div>
+        </AdminSection>
+        <AdminSection
+          title="اسناد الخطة"
+          description="أظهر نفس الخطة (قراءة فقط) لأشخاص إضافيين — يرونها كما تراها لسائقها الأساسي بدون أي تحكم."
+          actions={
+            <ToolbarButton variant="primary" onClick={() => setAssignees.mutate()} disabled={setAssignees.isPending}>
+              <UserPlusIcon className="h-4 w-4" />
+              {setAssignees.isPending ? "جاري الحفظ..." : "حفظ الإسناد"}
+            </ToolbarButton>
+          }
+        >
+          <PlanAssigneePicker
+            drivers={drivers}
+            excludedProfileId={plan.driverProfileId}
+            value={assigneeProfileIds}
+            onChange={setAssigneeProfileIds}
+          />
+          {(assigneesQuery.data?.length ?? 0) > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-emerald-600">المسندون حاليًا:</span>
+              {assigneesQuery.data?.map((item) => (
+                <span key={item.profileId} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                  {item.displayName}
+                </span>
+              ))}
+            </div>
+          )}
+        </AdminSection>
         <PlanItemsSummary items={items} />
         <AdminSection
           title="تسلسل الشحنات"
@@ -1572,7 +2102,7 @@ export function LogisticsDraftPlanPage() {
             </ToolbarButton>
           }
         >
-          {shipments.length === 0 ? <AdminEmptyState title="لا توجد شحنات في الخطة" description="أضف شحنات من صفحة الشحنات ثم ارجع إلى مساحة التخطيط." action={<Link to="/logistics/shipments"><ToolbarButton><PlusIcon className="h-4 w-4" />إضافة شحنات</ToolbarButton></Link>} /> : (
+          {shipments.length === 0 ? <AdminEmptyState title="لا توجد شحنات في الخطة" description="أضف شحنات من صفحة التخطيط ثم ارجع إلى مساحة التخطيط." action={<Link to="/logistics/plans/new"><ToolbarButton><PlusIcon className="h-4 w-4" />إضافة شحنات</ToolbarButton></Link>} /> : (
             <div className="overflow-x-auto">
               <table className="min-w-full text-right text-sm" dir="rtl">
                 <thead className="border-b border-gray-200 bg-brand-25/80 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02]">
@@ -1984,6 +2514,8 @@ interface ShipmentDetailRecord {
   move_type: string | null;
   notes: string | null;
   origin_ref: string | null;
+  pod_image_url: string | null;
+  pod_signed_at: string | null;
 }
 
 interface ShipmentItemRecord {
@@ -2059,6 +2591,16 @@ function resolveShipmentDetailBadge(status: string | null | undefined): { label:
   }
 }
 
+async function resolveProofStorageUrl(path: string | null): Promise<string | null> {
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return path;
+  const { data, error } = await supabase.storage
+    .from("delivery-proofs")
+    .createSignedUrl(path, 60 * 60);
+  if (error) throw error;
+  return data.signedUrl ?? null;
+}
+
 function formatShipmentAmount(value: number | null | undefined, currency = "EGP") {
   if (value == null || Number.isNaN(value)) return "--";
   return new Intl.NumberFormat("en-US", {
@@ -2096,6 +2638,8 @@ export function LogisticsShipmentDetailPage() {
   const [customer, setCustomer] = useState<ShipmentCustomerRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [proofPhotoUrl, setProofPhotoUrl] = useState<string | null>(null);
+  const [proofPhotoError, setProofPhotoError] = useState<string | null>(null);
 
   const loadShipment = useCallback(async () => {
     if (!shipmentId) return;
@@ -2108,7 +2652,7 @@ export function LogisticsShipmentDetailPage() {
         supabase
           .from("logistics_shipments")
           .select(
-            "id, shipment_reference, external_shipment_id, shipment_status, shipment_state, customer_id, customer_name, customer_phone, linked_order_id, warehouse_id, warehouse_name, plan_id, odoo_order_name, external_order_id, scheduled_at, completed_at, created_at, total_gmv, total_weight, total_cbm, picked_up_gmv, assigned_profile_id, assigned_user_name, delivery_phase, move_type, notes, origin_ref",
+            "id, shipment_reference, external_shipment_id, shipment_status, shipment_state, customer_id, customer_name, customer_phone, linked_order_id, warehouse_id, warehouse_name, plan_id, odoo_order_name, external_order_id, scheduled_at, completed_at, created_at, total_gmv, total_weight, total_cbm, picked_up_gmv, assigned_profile_id, assigned_user_name, delivery_phase, move_type, notes, origin_ref, pod_image_url, pod_signed_at",
           )
           .eq("id", shipmentId)
           .single(),
@@ -2172,6 +2716,25 @@ export function LogisticsShipmentDetailPage() {
   useEffect(() => {
     void loadShipment();
   }, [loadShipment]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const path = shipment?.pod_image_url ?? null;
+    setProofPhotoUrl(null);
+    setProofPhotoError(null);
+    if (!path) return;
+    (async () => {
+      try {
+        const signed = await resolveProofStorageUrl(path);
+        if (!cancelled) setProofPhotoUrl(signed);
+      } catch (signErr) {
+        if (!cancelled) setProofPhotoError(signErr instanceof Error ? signErr.message : "تعذر تحميل صورة الإثبات.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [shipment?.pod_image_url, shipment]);
 
   useEffect(() => {
     if (!shipmentId) return;
@@ -2348,6 +2911,42 @@ export function LogisticsShipmentDetailPage() {
         </ShipmentDetailCard>
 
         <div className="mt-5 space-y-5">
+          <ShipmentDetailCard>
+            <ShipmentDetailCardHeader
+              title="إثبات التسليم"
+              subtitle="الصورة التي التقطها السائق عند تأكيد التسليم"
+            />
+
+            {!shipment.pod_image_url ? (
+              <div className="flex min-h-[200px] items-center px-5 py-12">
+                <EmptyState title="لا يوجد إثبات تسليم" description="لم يتم حفظ صورة إثبات لهذه الشحنة بعد." />
+              </div>
+            ) : proofPhotoError ? (
+              <div className="flex min-h-[200px] items-center px-5 py-12">
+                <EmptyState title="تعذر تحميل صورة الإثبات" description={proofPhotoError} />
+              </div>
+            ) : !proofPhotoUrl ? (
+              <div className="flex min-h-[200px] items-center px-5 py-12">
+                <EmptyState title="جاري تحميل صورة الإثبات..." description="يتم إنشاء رابط التحميل الآن." />
+              </div>
+            ) : (
+              <div className="px-5 py-5">
+                <a href={proofPhotoUrl} target="_blank" rel="noreferrer">
+                  <img
+                    src={proofPhotoUrl}
+                    alt="إثبات التسليم"
+                    className="mx-auto max-h-[520px] rounded-2xl border border-gray-200 object-contain dark:border-gray-800"
+                  />
+                </a>
+                {shipment.pod_signed_at ? (
+                  <p className="mt-3 text-center text-xs text-gray-400 dark:text-gray-500">
+                    تم التقاطه في {formatDateTime(shipment.pod_signed_at)}
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </ShipmentDetailCard>
+
           <ShipmentDetailCard>
             <ShipmentDetailCardHeader
               title="أصناف الشحنة"

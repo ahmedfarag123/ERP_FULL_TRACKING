@@ -622,14 +622,16 @@ export async function fetchCustomerServiceAnalytics(startISO: string, endISO: st
   const deliveryLabels: Record<string, string> = { full: "تم بالكامل", partial: "ارجاع جزئي", cancelled: "ارجاع كلي", pending: "قيد الانتظار", other_delivery: "أخرى", unknown: "غير معروف" };
   for (const row of deliveryRows) {
     const o = Array.isArray(row.order) ? row.order[0] : row.order;
-    let key = o?.delivery_status || "unknown";
-    if (key === "false") key = "cancelled";
-    if (key === "unknown" || key === null) {
-      const xlStatus = row.raw_payload?.delivery_status_xl;
+    const xlStatus = row.raw_payload?.delivery_status_xl;
+    let key = "unknown";
+    if (xlStatus) {
       if (xlStatus === "بالكامل") key = "full";
       else if (xlStatus === "مرتجع جزئى") key = "partial";
-      else if (["مرتجع كلى بعد الوصول","مرتجع كلى قبل الوصول","مرتجع كلي","مرتجع كلى","الغاء"].includes(String(xlStatus ?? ""))) key = "cancelled";
-      else if (xlStatus) key = "other_delivery";
+      else if (["مرتجع كلى بعد الوصول","مرتجع كلى قبل الوصول","مرتجع كلي","مرتجع كلى","الغاء","مرتجع"].includes(String(xlStatus))) key = "cancelled";
+      else key = "other_delivery";
+    } else {
+      key = o?.delivery_status || "unknown";
+      if (key === "false") key = "cancelled";
     }
     byDelivery[key] = (byDelivery[key] || 0) + 1;
   }

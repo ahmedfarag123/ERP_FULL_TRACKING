@@ -55,7 +55,6 @@ export default function ShipmentDetailScreen() {
   const addNote = useDeliveryStore((s) => s.addShipmentNote);
   const setProofOfDelivery = useDeliveryStore((s) => s.setProofOfDelivery);
   const reportFailure = useDeliveryStore((s) => s.reportFailure);
-  const getRouteGate = useDeliveryStore((s) => s.getRouteGate);
   const user = useAuthStore((s) => s.user);
   const showToast = useUIStore((s) => s.showToast);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -157,9 +156,6 @@ export default function ShipmentDetailScreen() {
     );
   }
 
-  const { nextActionableShipmentId, outOfSequenceShipmentIds } = getRouteGate();
-  const isNextActionableShipment = shipment.id === nextActionableShipmentId;
-  const isOutOfSequence = outOfSequenceShipmentIds.has(shipment.id);
   const collectionAmount = formatMoney(
     shipment.collection?.pendingDeliveryAmount ?? shipment.collection?.amount ?? null,
     shipment.collection?.currencyCode ?? null
@@ -203,10 +199,6 @@ export default function ShipmentDetailScreen() {
 
   const handleStartDelivery = async () => {
     if (isSubmittingAction) return;
-    if (!isNextActionableShipment) {
-      showToast('أكمل نقطة التوقف السابقة قبل تحديث هذا الطلب.', 'error');
-      return;
-    }
     setIsSubmittingAction(true);
     try {
       await updateStatus(shipment.id, 'in_transit', 'بدأ خط التسليم');
@@ -253,10 +245,6 @@ export default function ShipmentDetailScreen() {
 
   const handleConfirmDelivery = async () => {
     if (isSubmittingAction) return;
-    if (!isNextActionableShipment) {
-      showToast('أكمل نقطة التوقف السابقة قبل تحديث هذا الطلب.', 'error');
-      return;
-    }
     if (!capturedFile || !user?.id) return;
 
     const shouldShowCollection = hasOutstandingCollection && (shipment.orders ?? []).length > 0;
@@ -312,10 +300,6 @@ export default function ShipmentDetailScreen() {
 
   const handleReportFailure = async () => {
     if (isSubmittingAction) return;
-    if (!isNextActionableShipment) {
-      showToast('أكمل نقطة التوقف السابقة قبل تحديث هذا الطلب.', 'error');
-      return;
-    }
     setIsSubmittingAction(true);
     try {
       await reportFailure(shipment.id, failureReason, failureNotes);
@@ -365,10 +349,6 @@ export default function ShipmentDetailScreen() {
 
   const handleRetryDelivery = async () => {
     if (isSubmittingAction) return;
-    if (!isNextActionableShipment) {
-      showToast('أكمل نقطة التوقف السابقة قبل تحديث هذا الطلب.', 'error');
-      return;
-    }
     setIsSubmittingAction(true);
     try {
       await updateStatus(shipment.id, 'pending', 'تمت جدولة إعادة المحاولة');
@@ -413,16 +393,6 @@ export default function ShipmentDetailScreen() {
             : ''}
         </span>
       </div>
-      {!isNextActionableShipment && shipment.status !== 'delivered' && shipment.status !== 'failed' && (
-        <div className="bg-warning-50 px-4 py-3 text-xs font-medium text-warning-600">
-          أكمل نقطة التوقف السابقة قبل تحديث هذا الطلب.
-        </div>
-      )}
-      {isOutOfSequence && (
-        <div className="bg-warning-50 px-4 py-3 text-xs font-medium text-warning-600">
-          تم إنهاء هذا الطلب بينما توجد نقطة سابقة في الخط لم تنته بعد.
-        </div>
-      )}
 
       <motion.div
         initial={{ opacity: 0 }}
@@ -679,14 +649,7 @@ export default function ShipmentDetailScreen() {
         transition={{ delay: 0.3, duration: 0.3 }}
         className="fixed bottom-0  -translate-x-1/2 w-full max-w-[430px] bg-white border-t border-app-border shadow-[0_-4px_12px_rgba(0,0,0,0.08)] px-4 py-3 z-[100]"
       >
-        {!isNextActionableShipment && shipment.status !== 'delivered' && shipment.status !== 'failed' && (
-          <div className="flex items-center justify-center gap-2 rounded-xl bg-gray-100 px-4 py-4 text-sm font-semibold text-app-text-secondary">
-            <Lock size={17} />
-            يجب إنهاء التوقف السابق
-          </div>
-        )}
-
-        {isNextActionableShipment && shipment.status === 'pending' && (
+        {shipment.status === 'pending' && (
           <div className="flex gap-3">
             <button
               onClick={() => void handleStartDelivery()}
@@ -706,7 +669,7 @@ export default function ShipmentDetailScreen() {
           </div>
         )}
 
-        {isNextActionableShipment && shipment.status === 'in_transit' && (
+        {shipment.status === 'in_transit' && (
           <div className="flex gap-3">
             <button
               onClick={() => setShowPODSheet(true)}

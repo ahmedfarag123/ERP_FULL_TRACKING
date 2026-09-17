@@ -27,8 +27,8 @@ import AdminLiveTrackingMap, {
 } from "../../../components/admin/AdminLiveTrackingMap";
 
 const HORECA_MARG_WAREHOUSE: MapPrimaryWarehouse = {
-  latitude: 30.1592333,
-  longitude: 31.357159,
+  latitude: 30.157468,
+  longitude: 31.359598,
   name: "Horeca Marg",
 };
 
@@ -552,6 +552,7 @@ function useMapData({ range }: DateRangeProps) {
           planReference: plan.plan_reference ?? plan.id,
           driverId: plan.assigned_profile_id ?? "",
           driverName: driver?.driverName ?? "سائق",
+          planStatus: plan.plan_status,
           warehouseName: warehouseByPlan.get(plan.id) ?? HORECA_MARG_WAREHOUSE.name,
           warehouseLatitude: warehouseCoord.latitude,
           warehouseLongitude: warehouseCoord.longitude,

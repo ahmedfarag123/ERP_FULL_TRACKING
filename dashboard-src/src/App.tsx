@@ -36,6 +36,7 @@ const VisitDetailPage = lazy(() => import("./pages/Admin/VisitDetailPage"));
 const CustomerServicePage = lazy(() => import("./pages/Admin/CustomerServicePage"));
 const TicketDetailPage = lazy(() => import("./pages/Admin/TicketDetailPage"));
 const CustomerServiceAnalytics = lazy(() => import("./pages/Admin/CustomerServiceAnalytics"));
+const DeliveryAnalyticsPage = lazy(() => import("./pages/Admin/Logistics/DeliveryAnalyticsPage"));
 const LogisticsOverviewPage = lazy(() =>
   import("./pages/Admin/Logistics/LogisticsPages").then((module) => ({
     default: module.LogisticsOverviewPage,
@@ -89,6 +90,7 @@ const SignUp = lazy(() => import("./pages/AuthPages/SignUp"));
 const ForcePasswordChange = lazy(() => import("./pages/AuthPages/ForcePasswordChange"));
 const DashboardPage = lazy(() => import("./pages/Dashboard/DashboardPage"));
 const KpiDashboardPage = lazy(() => import("./pages/Admin/KPIs/KpiDashboardPage"));
+const ScoreCardsPage = lazy(() => import("./pages/Admin/ScoreCards/ScoreCardsPage"));
 const NotFound = lazy(() => import("./pages/OtherPage/NotFound"));
 
 function SuspendedOutlet() {
@@ -117,6 +119,7 @@ export default function App() {
                 <Route index path="/" element={<DashboardPage />} />
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/kpis" element={<KpiDashboardPage />} />
+                <Route path="/scorecards" element={<ScoreCardsPage />} />
               </Route>
               <Route element={<PermissionRoute anyOf={["orders.view", "orders.manage"]} />}>
                 <Route path="/orders" element={<OrdersManagement />} />
@@ -154,6 +157,7 @@ export default function App() {
               </Route>
               <Route element={<PermissionRoute anyOf={["logistics.view", "logistics.manage"]} />}>
                 <Route path="/logistics" element={<LogisticsOverviewPage />} />
+                <Route path="/logistics/analytics" element={<DeliveryAnalyticsPage />} />
                 <Route path="/logistics/shipments" element={<LogisticsShipmentsPage />} />
                 <Route path="/logistics/plans" element={<LogisticsPlansPage />} />
                 <Route path="/logistics/plans/new" element={<LogisticsNewPlanPage />} />

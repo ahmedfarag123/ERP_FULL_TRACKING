@@ -51,6 +51,7 @@ function normalizePhone(input: string) {
 
 type ProfileAuthCheck = {
   valid?: boolean;
+  authEmail?: string;
   requiresPasswordChange?: boolean;
 };
 
@@ -97,21 +98,6 @@ async function checkProfileAuth(payload: { email?: string; phone?: string }) {
   }
 
   return data;
-}
-
-async function trySignIn(phone: string, password: string) {
-  const e164 = normalizePhone(phone);
-  const local = phone.trim().replace(/[^\d]/g, '');
-
-  const first = await supabase.auth.signInWithPassword({ phone: e164, password });
-  if (!first.error || first.data.session) return first;
-
-  if (e164 !== local) {
-    const second = await supabase.auth.signInWithPassword({ phone: local, password });
-    if (!second.error || second.data.session) return second;
-  }
-
-  return first;
 }
 
 async function resolveAndSetDriver(session: Session | null, set: (state: Partial<AuthState>) => void) {
@@ -161,20 +147,24 @@ export const useAuthStore = create<AuthState>()(
             ? { email: identifier }
             : { phone: normalizePhone(identifier) };
 
-          const profileCheck = await checkProfileAuth(profilePayload);
+const profileCheck = await checkProfileAuth(profilePayload);
 
           if (!profileCheck) {
             set({ isLoading: false });
             return false;
           }
 
-          const credentials = isEmail
-            ? { email: identifier, password }
-            : undefined;
+          const authEmail = profileCheck.authEmail ?? (isEmail ? identifier : null);
 
-          const { data, error } = isEmail
-            ? await supabase.auth.signInWithPassword(credentials!)
-            : await trySignIn(identifier, password);
+          if (!authEmail) {
+            set({ isLoading: false });
+            return false;
+          }
+
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email: authEmail,
+            password,
+          });
 
           if (error || !data.session) {
             set({ isLoading: false });

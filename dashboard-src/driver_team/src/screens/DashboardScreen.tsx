@@ -16,17 +16,22 @@ import {
   MapPin,
   ChevronLeft,
   RotateCcw,
+  Eye,
+  Lock,
+  Layers,
 } from 'lucide-react';
 import { useDeliveryStore } from '@/stores/deliveryStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useAuthStore } from '@/stores/authStore';
 import ShipmentListItem from '@/components/ShipmentListItem';
 import BottomSheet from '@/components/BottomSheet';
+import StatusBadge from '@/components/StatusBadge';
 import DriverDashboardMap from '@/components/DriverDashboardMap';
 import EndOfRouteModal from '@/components/EndOfRouteModal';
 import { createDriverSosAlert } from '@/services/driverAlerts';
 import { submitCollectionRequest, submitCollectionHandover } from '@/services/collectionHandover';
-import { uploadDeliveryProof, fetchOrderCollectionsForPlan } from '@/services/shipmentData';
+import { uploadDeliveryProof, fetchOrderCollectionsForPlan, driverWarehouseCheckIn } from '@/services/shipmentData';
+import { getCurrentDriverLocation } from '@/services/locationTracking';
 import { driverAsset } from '@/lib/appAssets';
 import type { SettlementBreakdown } from '@/types';
 
@@ -37,6 +42,18 @@ const containerVariants = {
     transition: { staggerChildren: 0.06 },
   },
 };
+
+const WAREHOUSE_GEOFENCE_RADIUS_METERS = 500;
+
+function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 const itemVariants = {
   hidden: { opacity: 0, y: 16 },
@@ -81,7 +98,28 @@ export default function DashboardScreen() {
   const getStats = useDeliveryStore((s) => s.getStats);
   const storeActivePlanId = useDeliveryStore((s) => s.activePlanId);
   const allPlans = useDeliveryStore((s) => s.allPlans);
+  const attendedToday = useDeliveryStore((s) => s.attendedToday);
+  const pendingPlans = useDeliveryStore((s) => s.pendingPlans);
+  const viewerPlans = useDeliveryStore((s) => s.viewerPlans);
+  const viewerShipments = useDeliveryStore((s) => s.viewerShipments);
   const stats = useMemo(() => getStats(), [getStats]);
+
+  const currentRound = useMemo(() => {
+    const rounds = allPlans
+      .map((plan) => Number(plan.round_no))
+      .filter((value) => Number.isFinite(value) && value >= 1);
+    return rounds.length > 0 ? Math.min(...rounds) : null;
+  }, [allPlans]);
+  const lockedPlans = useMemo(
+    () =>
+      pendingPlans
+        .slice()
+        .sort(
+          (left, right) =>
+            (Number(left.round_no) || 1) - (Number(right.round_no) || 1)
+        ),
+    [pendingPlans]
+  );
 
   useEffect(() => {
     loadShipments();
@@ -105,6 +143,7 @@ export default function DashboardScreen() {
     .filter((collection) =>
       collection &&
       collection.collectionStatus !== 'collected_successfully' &&
+      collection.collectionStatus !== 'collected_from_customer' &&
       (collection.driverDebtAmount ?? 0) > 0
     );
   const outstandingCollectionAmount = outstandingCollections.reduce(
@@ -113,16 +152,14 @@ export default function DashboardScreen() {
   );
   const collectionCurrency = outstandingCollections[0]?.currencyCode ?? 'EGP';
   const activePlanId =
-    storeActivePlanId ??
-    activeShipment?.planId ??
     shipments.find((shipment) => !isTerminalShipment(shipment) && shipment.planId)?.planId ??
-    (outstandingCollectionAmount > 0 ? shipments.find((shipment) => shipment.planId)?.planId : null) ??
-    shipments.find((shipment) => shipment.planId)?.planId ??
+    activeShipment?.planId ??
+    storeActivePlanId ??
     null;
 
   useEffect(() => {
     if (activePlanId && user?.id) {
-      void fetchOrderCollectionsForPlan(activePlanId, user.id).then(setSettlementBreakdown);
+      void fetchOrderCollectionsForPlan(activePlanId).then(setSettlementBreakdown);
     }
   }, [activePlanId, user?.id]);
 
@@ -132,10 +169,14 @@ export default function DashboardScreen() {
   const activePhase = (() => {
     if (!storeActivePlanId && !hasActionableShipments && allPlans.length === 0) return 'no_plan';
     if (activePlanShipments.length === 0 && !storeActivePlanId && allPlans.length === 0) return 'no_plan';
+    if (attendedToday && !hasActionableShipments && !storeActivePlanId && allPlans.length === 0) return 'attended';
     if (activePlanShipments.length === 0 && allPlans.length > 0) return 'plan_ready';
     if (activePlanShipments.length === 0 && storeActivePlanId) return 'plan_ready';
-    if (activePlanShipments.every(isTerminalShipment)) {
-      return 'delivered';
+    if (activePlanShipments.every(isTerminalShipment) && activePlanShipments.length > 0) {
+      // Only show the end-of-route flow while the finished plan is still our
+      // active plan (in_progress). Once completed (or if no active plan),
+      // move on so the driver can check in / start the new day.
+      return activePlanId ? 'delivered' : 'no_plan';
     }
     if (activePlanShipments.some((shipment) => shipment.status === 'in_transit')) return 'out_for_delivery';
     const pendingInPlan = activePlanShipments.filter((shipment) => shipment.status === 'pending');
@@ -148,13 +189,14 @@ export default function DashboardScreen() {
     ) {
       return 'starting_shift';
     }
+    // After warehouse check-in, pending shipments move straight to the
+    // receiving (second) step instead of going back to the check-in step.
+    if (attendedToday && pendingInPlan.length > 0) {
+      return 'starting_shift';
+    }
     return 'assigned';
   })();
-  const canUseWorkflowAction =
-    !isWorkflowSubmitting &&
-    activePhase !== 'no_plan' &&
-    activePhase !== 'plan_ready' &&
-    (activePhase === 'assigned' || activePhase === 'delivered' || Boolean(activePlanId || activeShipment));
+  const canUseWorkflowAction = !isWorkflowSubmitting;
   const workflowSteps = [
     {
       key: 'assigned',
@@ -186,6 +228,8 @@ export default function DashboardScreen() {
   const rawWorkflowIndex = workflowSteps.findIndex((step) => step.key === activePhase);
   const activeStepIndex = activePhase === 'delivered'
     ? workflowSteps.length
+    : activePhase === 'attended'
+    ? 1
     : Math.max(0, rawWorkflowIndex);
   const currentWorkflowStep =
     activePhase === 'delivered'
@@ -195,13 +239,18 @@ export default function DashboardScreen() {
         }
       : activePhase === 'no_plan'
       ? {
-          label: 'لا توجد خطة',
-          description: 'ستظهر خطوات السير عند إسناد خط تسليم لك.',
+          label: 'الوصول للمخزن',
+          description: 'سجّل وصولك للمخزن حتى يتم تجهيز خط السير.',
         }
       : activePhase === 'plan_ready'
       ? {
-          label: 'الخطة جاهزة',
-          description: 'تم تجهيز الخطة. في انتظار الشحنات.',
+          label: 'الوصول للمخزن',
+          description: 'سجّل وصولك للمخزن أثناء تجهيز الخطة.',
+        }
+      : activePhase === 'attended'
+      ? {
+          label: 'استلام البضاعة',
+          description: 'تم تسجيل وصولك وحضورك بالمخزن بالفعل. في انتظار تجهيز الخطة والشحنات لتسليمك.',
         }
       : workflowSteps[activeStepIndex];
   const workflowActionLabel =
@@ -217,6 +266,8 @@ export default function DashboardScreen() {
       ? 'نهاية خط السير'
       : activePhase === 'plan_ready'
       ? 'الخطة جاهزة'
+      : activePhase === 'attended'
+      ? 'تم وصولك للمخزن'
       : 'وصلت المخزن';
 
   const recentActivity = shipments
@@ -276,13 +327,71 @@ export default function DashboardScreen() {
     setIsWorkflowSubmitting(true);
 
     try {
-      if (activePhase === 'assigned') {
-        if (!activePlanId) {
-          showToast('لا توجد خطة عمل مسندة لك بعد. في انتظار إسناد خط تسليم.', 'info');
-          return;
+      if (activePhase === 'no_plan' || activePhase === 'plan_ready' || activePhase === 'assigned') {
+        const pendingShipments = shipments.filter((s) => s.status === 'pending');
+        const warehouseShipment = pendingShipments.find(
+          (s) => s.warehouseCoordinates && s.warehouseCoordinates.lat != null && s.warehouseCoordinates.lng != null
+        );
+        let lat: number | null = null;
+        let lng: number | null = null;
+        try {
+          const loc = await getCurrentDriverLocation(10000);
+          lat = loc.lat;
+          lng = loc.lng;
+        } catch {
+          lat = null;
+          lng = null;
         }
-        await startShift();
-        showToast('تم حفظ خطوة الوصول للمخزن');
+
+        const warehouseName = warehouseShipment?.warehouseOrigin || 'Horeca Marg';
+        if (warehouseShipment) {
+          const wLat = warehouseShipment.warehouseCoordinates!.lat;
+          const wLng = warehouseShipment.warehouseCoordinates!.lng;
+          if (lat != null && lng != null) {
+            const dist = haversineDistance(lat, lng, wLat, wLng);
+            if (dist > WAREHOUSE_GEOFENCE_RADIUS_METERS) {
+              showToast(
+                `أنت على بعد ${Math.round(dist)} م من المخزن. يجب أن تكون ضمن ${WAREHOUSE_GEOFENCE_RADIUS_METERS} م للوصول.`,
+                'error'
+              );
+              return;
+            }
+          }
+        }
+
+        await driverWarehouseCheckIn({ lat, lng, warehouseName });
+        useDeliveryStore.setState({ attendedToday: true });
+
+        // Reload shipments so newly assigned plans/shipments appear and the
+        // workflow can advance even if the app was idle when they were synced.
+        await loadShipments();
+        const refreshed = useDeliveryStore.getState();
+        const currentPending = refreshed.shipments.filter((s) => s.status === 'pending');
+        const resolvedPlanId = refreshed.activePlanId ?? activePlanId;
+        if (currentPending.length > 0 && resolvedPlanId) {
+          await startShift();
+          showToast('تم تسجيل وصولك للمخزن وأصبحت الشحنات في انتظار التحميل', 'success');
+        } else {
+          showToast(
+            'تم تسجيل وصولك للمخزن. في انتظار تعيين الشحنات للخطة.',
+            'info'
+          );
+        }
+        return;
+      }
+      if (activePhase === 'attended') {
+        // Already checked in at the warehouse with no plan yet. Re-sync in case
+        // a plan/shipments were just assigned, then stay pinned on the second
+        // step (receiving) until there is actual goods to receive or a route.
+        await loadShipments();
+        const refreshed = useDeliveryStore.getState();
+        const currentPending = refreshed.shipments.filter((s) => s.status === 'pending');
+        if (currentPending.length > 0 && refreshed.activePlanId) {
+          await startShift();
+          showToast('تم تعيين الشحنات وبدأت مرحلة الاستلام', 'success');
+        } else {
+          showToast('في انتظار تجهيز الخطة والشحنات لتسليمك.', 'info');
+        }
         return;
       }
       if (activePhase === 'starting_shift') {
@@ -302,8 +411,10 @@ export default function DashboardScreen() {
         return;
       }
       if (activePhase === 'delivered') {
-        setActiveTab('collection');
-        navigate('/collection');
+        if (activePlanId) {
+          void fetchOrderCollectionsForPlan(activePlanId).then(setSettlementBreakdown);
+        }
+        setShowEndOfRouteModal(true);
         return;
       }
       showToast('لا توجد خطة عمل نشطة', 'info');
@@ -676,7 +787,7 @@ export default function DashboardScreen() {
             {workflowSteps.map((step, index) => {
               const StepIcon = step.icon;
               const isDone = activePhase === 'delivered' || index < activeStepIndex;
-              const isCurrent = index === activeStepIndex && activePhase !== 'delivered' && activePhase !== 'no_plan';
+              const isCurrent = index === activeStepIndex && activePhase !== 'delivered';
 
               return (
                 <div key={step.key} className="flex-1 flex flex-col items-center gap-1.5 relative">
@@ -717,6 +828,14 @@ export default function DashboardScreen() {
           </div>
 
           {/* Current Step Description */}
+          {activePhase === 'attended' && (
+            <div className="mt-4 flex items-center justify-center">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200">
+                <CheckCircle size={14} />
+                تم تسجيل وصولك وحضورك بالمخزن
+              </span>
+            </div>
+          )}
           <p className="text-xs text-gray-500 mt-4 text-center leading-relaxed">
             {currentWorkflowStep.description}
           </p>
@@ -740,7 +859,7 @@ export default function DashboardScreen() {
               className={`h-12 flex-1 rounded-xl px-4 text-sm font-bold text-white active:scale-[0.97] transition-all flex items-center justify-center gap-2 ${
                 !canUseWorkflowAction
                   ? 'bg-gray-300 cursor-not-allowed'
-                  : activePhase === 'out_for_delivery'
+                  : activePhase === 'attended' || activePhase === 'out_for_delivery'
                   ? 'bg-gradient-to-r from-emerald-500 to-teal-500 shadow-lg shadow-emerald-200'
                   : activePhase === 'delivered'
                   ? 'bg-gradient-to-r from-blue-500 to-blue-600 shadow-lg shadow-blue-200'
@@ -751,6 +870,7 @@ export default function DashboardScreen() {
               {activePhase === 'starting_shift' && <FileCheck2 size={16} />}
               {activePhase === 'picked_up' && <Truck size={16} />}
               {activePhase === 'out_for_delivery' && <MapPin size={16} />}
+              {activePhase === 'attended' && <CheckCircle size={16} />}
               {activePhase === 'delivered' && <CheckCircle size={16} />}
               {workflowActionLabel}
             </button>
@@ -870,6 +990,137 @@ export default function DashboardScreen() {
                 />
               ))}
             </div>
+          </motion.div>
+        )}
+
+        {/* Driver rounds (خطط الأشواط) */}
+        {(allPlans.length > 0 || lockedPlans.length > 0) && (
+          <motion.div variants={itemVariants} className="px-4 mt-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Layers size={15} className="text-blue-500" />
+              <h3 className="text-sm font-semibold text-gray-800">الأشواط</h3>
+              {currentRound !== null && (
+                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-600">
+                  الشوط الحالي: {currentRound}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-col gap-2.5">
+              {[...allPlans]
+                .sort((left, right) => (Number(left.round_no) || 1) - (Number(right.round_no) || 1))
+                .map((plan) => {
+                  const round = Number(plan.round_no) || 1;
+                  const statusLabel =
+                    String(plan.plan_status ?? '') === 'completed' ? 'مكتملة' : 'جارية';
+                  return (
+                    <div
+                      key={plan.id}
+                      className="flex items-center gap-2.5 bg-white rounded-xl shadow-sm border border-gray-100 px-3 py-2.5"
+                    >
+                      <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-600 flex-shrink-0">
+                        الشوط {round}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] font-bold text-gray-900 truncate" dir="ltr">
+                          {plan.plan_reference ?? plan.id}
+                        </p>
+                        <p className="text-[11px] text-gray-400">
+                          {plan.planned_date ? new Date(plan.planned_date).toLocaleDateString('ar-EG') : ''}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                          String(plan.plan_status ?? '') === 'completed'
+                            ? 'bg-emerald-50 text-emerald-600'
+                            : 'bg-amber-50 text-amber-600'
+                        }`}
+                      >
+                        {statusLabel}
+                      </span>
+                    </div>
+                  );
+                })}
+              {lockedPlans.map((plan) => {
+                const round = Number(plan.round_no) || 1;
+                return (
+                  <div
+                    key={plan.id}
+                    className="flex items-center gap-2.5 bg-gray-50 rounded-xl border border-dashed border-gray-200 px-3 py-2.5"
+                  >
+                    <Lock size={15} className="text-gray-400 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-bold text-gray-500 truncate" dir="ltr">
+                        {plan.plan_reference ?? plan.id}
+                      </p>
+                      <p className="text-[11px] text-gray-400">
+                        الشوط {round} — مقفول حتى إتمام الأشواط السابقة
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-bold text-gray-500 flex-shrink-0">
+                      الشوط {round}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Shared plans (read-only) */}
+        {viewerPlans.length > 0 && (
+          <motion.div variants={itemVariants} className="px-4 mt-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Eye size={15} className="text-indigo-500" />
+              <h3 className="text-sm font-semibold text-gray-800">خطط معروضة (قراءة فقط)</h3>
+              <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-600">
+                {viewerPlans.length}
+              </span>
+            </div>
+            <div className="flex flex-col gap-3">
+              {viewerPlans.map((plan) => {
+                const planShipments = viewerShipments.filter((shipment) => shipment.planId === plan.id);
+                return (
+                  <div key={plan.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-50">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Package size={15} className="text-indigo-400 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-gray-900 truncate" dir="ltr">
+                            {plan.plan_reference ?? plan.id}
+                          </p>
+                          <p className="text-[11px] text-gray-400">
+                            {plan.planned_date ? new Date(plan.planned_date).toLocaleDateString('ar-EG') : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[10px] font-bold text-indigo-600">
+                        {planShipments.length} شحنة
+                      </span>
+                    </div>
+                    {planShipments.length > 0 && (
+                      <div className="divide-y divide-gray-50">
+                        {planShipments.map((shipment) => (
+                          <div key={shipment.id} className="flex items-center justify-between gap-2 px-4 py-2.5">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-xs font-semibold text-gray-400 w-5 flex-shrink-0">
+                                {shipment.routeOrder ? `#${shipment.routeOrder}` : '#'}
+                              </span>
+                              <p className="text-[13px] text-gray-700 truncate" dir="auto" data-preserve-source-text>
+                                {shipment.customerName ?? `#${String(shipment.id).slice(0, 8)}`}
+                              </p>
+                            </div>
+                            <StatusBadge status={shipment.status} size="sm" />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-2">
+              هذه الخطط مسندة لعرضها فقط — يمكنك متابعتها ولا يمكنك تعديلها أو تنفيذ تسليماتها.
+            </p>
           </motion.div>
         )}
 

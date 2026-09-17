@@ -226,7 +226,11 @@ const shipmentSelect =
 export type AssignedShipmentsResult = {
   activePlanId: string | null;
   allPlans: AssignedPlanRow[];
+  pendingPlans: AssignedPlanRow[];
   shipments: DriverShipment[];
+  viewerPlans: AssignedPlanRow[];
+  viewerShipments: DriverShipment[];
+  attendedToday: boolean;
 };
 
 export type AssignedPlanRow = {
@@ -236,6 +240,7 @@ export type AssignedPlanRow = {
   planned_date: string | null;
   started_at: string | null;
   created_at: string | null;
+  round_no: number | null;
 };
 
 function planTimestamp(value: string | null | undefined) {
@@ -268,6 +273,13 @@ function chooseActivePlan(plans: AssignedPlanRow[] | null | undefined) {
   })[0] ?? null;
 }
 
+function chooseActivePlanForDriver(plans: AssignedPlanRow[] | null | undefined) {
+  const openPlans = (plans ?? []).filter(
+    (plan) => plan.plan_status !== 'completed' && plan.plan_status !== 'cancelled' && plan.plan_status !== 'not_executed'
+  );
+  return chooseActivePlan(openPlans);
+}
+
 function isTerminalAssignedShipment(shipment: Pick<DriverShipment, 'delivery_phase' | 'shipment_status'>) {
   const phase = String(shipment.delivery_phase ?? '').trim().toLowerCase();
   const status = String(shipment.shipment_status ?? '').trim().toUpperCase();
@@ -282,7 +294,7 @@ function chooseActivePlanForShipments(
   plans: AssignedPlanRow[],
   shipments: Pick<DriverShipment, 'plan_id' | 'delivery_phase' | 'shipment_status'>[]
 ) {
-  if (shipments.length === 0) return chooseActivePlan(plans);
+  if (shipments.length === 0) return chooseActivePlanForDriver(plans);
 
   const actionablePlanIds = new Set(
     shipments
@@ -290,29 +302,109 @@ function chooseActivePlanForShipments(
       .map((shipment) => String(shipment.plan_id))
   );
 
-  if (actionablePlanIds.size === 0) return chooseActivePlan(plans);
+  if (actionablePlanIds.size === 0) return chooseActivePlanForDriver(plans);
 
-  return chooseActivePlan(plans.filter((plan) => actionablePlanIds.has(String(plan.id))));
+  return chooseActivePlanForDriver(plans.filter((plan) => actionablePlanIds.has(String(plan.id))));
 }
 
 async function fetchAssignedShipmentsForProfile(profileId: string): Promise<AssignedShipmentsResult> {
-  const { data: plans, error: plansError } = await withSupabaseLockRetry(() =>
+  // Plans this driver is an extra assignee (co-driver) of. These are fully
+  // operable plans, not read-only viewers.
+  const { data: assigneeRows, error: assigneeError } = await withSupabaseLockRetry(() =>
     supabase
-      .from('logistics_delivery_plans')
-      .select('id, plan_reference, plan_status, planned_date, started_at, created_at')
-      .eq('assigned_profile_id', profileId)
-      .in('plan_status', ['in_progress', 'completed'])
-      .order('planned_date', { ascending: false })
-      .order('started_at', { ascending: false, nullsFirst: false })
-      .order('created_at', { ascending: false })
-      .limit(20)
+      .from('logistics_plan_assignees')
+      .select('plan_id')
+      .eq('profile_id', profileId)
+  );
+  if (assigneeError) {
+    throw new Error(assigneeError.message);
+  }
+  const assigneePlanIds = Array.from(
+    new Set((assigneeRows ?? []).map((row) => String(row.plan_id)).filter(Boolean))
   );
 
-  if (plansError) {
-    throw new Error(plansError.message);
+  function cairoDateToday(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Cairo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+async function fetchDriverAttendedToday(profileId: string): Promise<boolean> {
+  try {
+    const { data, error } = await withSupabaseLockRetry(() =>
+      supabase
+        .from('driver_attendance')
+        .select('id')
+        .eq('driver_profile_id', profileId)
+        .eq('work_date', cairoDateToday())
+        .maybeSingle()
+    );
+    if (error) return false;
+    return Boolean(data);
+  } catch {
+    // Attendance is supplementary to the shipments feed; never block loading on it.
+    return false;
+  }
+}
+
+// Only CURRENT (in_progress / pending) work is surfaced in the driver app.
+  // Finished plans disappear entirely — they live on in the database for
+  // logistics/admin reporting only.
+  const [assignedActive, assigneeActive] = await Promise.all([
+    withSupabaseLockRetry(() =>
+      supabase
+        .from('logistics_delivery_plans')
+        .select('id, plan_reference, plan_status, planned_date, started_at, created_at, round_no')
+        .eq('assigned_profile_id', profileId)
+        .eq('plan_status', 'in_progress')
+        .order('planned_date', { ascending: false })
+        .order('started_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(20)
+    ),
+    assigneePlanIds.length > 0
+      ? withSupabaseLockRetry(() =>
+          supabase
+            .from('logistics_delivery_plans')
+            .select('id, plan_reference, plan_status, planned_date, started_at, created_at, round_no')
+            .in('id', assigneePlanIds)
+            .eq('plan_status', 'in_progress')
+            .order('planned_date', { ascending: false })
+            .order('started_at', { ascending: false, nullsFirst: false })
+            .limit(20)
+        )
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (assignedActive.error) {
+    throw new Error(assignedActive.error.message);
+  }
+  if (assigneeActive.error) {
+    throw new Error(assigneeActive.error.message);
   }
 
-  const assignedPlans = (plans ?? []) as AssignedPlanRow[];
+  const seenPlanIds = new Set<string>();
+  const assignedPlans = [
+    ...(assignedActive.data ?? []),
+  ] as AssignedPlanRow[];
+  for (const plan of assignedPlans) {
+    seenPlanIds.add(String(plan.id));
+  }
+  for (const plan of [...(assigneeActive.data ?? [])] as AssignedPlanRow[]) {
+    if (!seenPlanIds.has(String(plan.id))) {
+      assignedPlans.push(plan);
+      seenPlanIds.add(String(plan.id));
+    }
+  }
+  assignedPlans.sort(
+    (a, b) =>
+      String(b.planned_date ?? '').localeCompare(String(a.planned_date ?? '')) ||
+      String(b.started_at ?? '').localeCompare(String(a.started_at ?? ''))
+  );
+
   const assignedPlanIds = assignedPlans.map((plan) => String(plan.id)).filter(Boolean);
 
   let query = supabase
@@ -336,27 +428,59 @@ async function fetchAssignedShipmentsForProfile(profileId: string): Promise<Assi
     throw new Error(error.message);
   }
 
-  const shipments = (data ?? []) as DriverShipment[];
+const shipments = (data ?? []) as DriverShipment[];
+
+  // Assignee plans are merged into the main lists above; viewers are no longer used.
+  const viewerPlans: AssignedPlanRow[] = [];
+  const viewerShipments: DriverShipment[] = [];
+
+  // Plans of later rounds (or unstarted) - shown read-only until unlocked.
+  let pendingPlans: AssignedPlanRow[] = [];
+  const { data: pPlans, error: pPlansError } = await withSupabaseLockRetry(() =>
+    supabase
+      .from('logistics_delivery_plans')
+      .select('id, plan_reference, plan_status, planned_date, started_at, created_at, round_no')
+      .eq('assigned_profile_id', profileId)
+      .in('plan_status', ['pending'])
+      .order('round_no', { ascending: true })
+      .order('planned_date', { ascending: false })
+      .limit(20)
+  );
+  if (pPlansError) {
+    throw new Error(pPlansError.message);
+  }
+  pendingPlans = (pPlans ?? []) as AssignedPlanRow[];
+
   const activePlan = chooseActivePlanForShipments(assignedPlans, shipments);
   const activePlanId = activePlan?.id ? String(activePlan.id) : null;
   const customerIds = Array.from(
     new Set(
-      shipments
+      [...shipments, ...viewerShipments]
         .map((shipment) => shipment.customer_id)
         .filter((value): value is string => Boolean(value))
     )
   );
 
-  const [customerMap, collectionMap, ordersMap] = await Promise.all([
+  const [customerMap, collectionMap, ordersMap, attendedToday] = await Promise.all([
     fetchCustomers(customerIds),
-    fetchCollections(shipments),
-    fetchOrdersForShipments(shipments),
+    fetchCollections([...shipments, ...viewerShipments]),
+    fetchOrdersForShipments([...shipments, ...viewerShipments]),
+    fetchDriverAttendedToday(profileId),
   ]);
 
   return {
     activePlanId,
     allPlans: assignedPlans,
+    pendingPlans,
+    attendedToday,
     shipments: shipments.map((shipment) => ({
+      ...shipment,
+      customer: resolveShipmentCustomer(shipment, customerMap),
+      collection: collectionMap.get(shipment.id) ?? null,
+      orders: ordersMap.get(shipment.id) ?? [],
+    })),
+    viewerPlans,
+    viewerShipments: viewerShipments.map((shipment) => ({
       ...shipment,
       customer: resolveShipmentCustomer(shipment, customerMap),
       collection: collectionMap.get(shipment.id) ?? null,
@@ -553,34 +677,47 @@ function attachPreparationStatus(
   });
 }
 
-export async function fetchAssignedShipmentDetails(profileId: string): Promise<{ activePlanId: string | null; allPlans: AssignedPlanRow[]; details: DriverShipmentDetail[] }> {
-  const { activePlanId, allPlans, shipments } = await fetchAssignedShipmentsForProfile(profileId);
-  const shipmentIds = shipments.map((shipment) => shipment.id);
+export async function fetchAssignedShipmentDetails(profileId: string): Promise<{
+  activePlanId: string | null;
+  allPlans: AssignedPlanRow[];
+  pendingPlans: AssignedPlanRow[];
+  details: DriverShipmentDetail[];
+  viewerPlans: AssignedPlanRow[];
+  viewerDetails: DriverShipmentDetail[];
+  attendedToday: boolean;
+}> {
+  const { activePlanId, allPlans, pendingPlans, shipments, viewerPlans, viewerShipments, attendedToday } = await fetchAssignedShipmentsForProfile(profileId);
+  const allShipments = [...shipments, ...viewerShipments];
+  const shipmentIds = allShipments.map((shipment) => shipment.id);
   const [itemsByShipment, eventsByShipment, prepStatusByProduct] = await Promise.all([
-    fetchShipmentItemsForShipments(shipments),
+    fetchShipmentItemsForShipments(allShipments),
     fetchShipmentEvents(shipmentIds),
-    fetchPlanPreparationStatus(shipments.map((s) => s.plan_id).filter(Boolean) as string[]),
+    fetchPlanPreparationStatus(allShipments.map((s) => s.plan_id).filter(Boolean) as string[]),
   ]);
+
+  const buildDetail = (shipment: DriverShipment): DriverShipmentDetail => ({
+    shipment,
+    items: attachPreparationStatus(itemsByShipment.get(shipment.id) ?? [], prepStatusByProduct),
+    events: eventsByShipment.get(shipment.id) ?? [],
+    collection: shipment.collection ?? null,
+  });
 
   return {
     activePlanId,
     allPlans,
-    details: shipments.map((shipment) => ({
-      shipment,
-      items: attachPreparationStatus(itemsByShipment.get(shipment.id) ?? [], prepStatusByProduct),
-      events: eventsByShipment.get(shipment.id) ?? [],
-      collection: shipment.collection ?? null,
-    })),
+    pendingPlans,
+    attendedToday,
+    details: shipments.map(buildDetail),
+    viewerPlans,
+    viewerDetails: viewerShipments.map(buildDetail),
   };
 }
 
 export async function fetchShipmentDetail(shipmentId: string): Promise<DriverShipmentDetail> {
-  const profileId = await getCurrentDriverProfileId();
   const { data: shipmentData, error: shipmentError } = await supabase
     .from('logistics_shipments')
     .select(shipmentSelect)
     .eq('id', shipmentId)
-    .eq('assigned_profile_id', profileId)
     .maybeSingle();
 
   if (shipmentError) {
@@ -706,6 +843,22 @@ export async function driverStartDeliveryRoute(input: {
   return data;
 }
 
+export async function driverWarehouseCheckIn(input: {
+  lat: number | null;
+  lng: number | null;
+  warehouseName?: string | null;
+  note?: string | null;
+}) {
+  const { data, error } = await supabase.rpc('driver_warehouse_check_in', {
+    p_lat: input.lat,
+    p_lng: input.lng,
+    p_warehouse_name: input.warehouseName,
+    p_note: input.note,
+  });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 export async function driverFinishDeliveryRoute(planId: string) {
   const { data, error } = await supabase.rpc('driver_finish_delivery_route', {
     p_plan_id: planId,
@@ -715,29 +868,33 @@ export async function driverFinishDeliveryRoute(planId: string) {
 }
 
 export async function fetchOrderCollectionsForPlan(
-  planId: string,
-  profileId: string
+  planId: string
 ): Promise<import('@/types').SettlementBreakdown> {
   const { data: shipments, error: shipmentsError } = await supabase
     .from('logistics_shipments')
-    .select('id')
-    .eq('plan_id', planId)
-    .eq('assigned_profile_id', profileId);
+    .select('id, is_return_shipment')
+    .eq('plan_id', planId);
 
   if (shipmentsError || !shipments || shipments.length === 0) {
     return { cashDebt: 0, transferAmount: 0, chequeAmount: 0, creditAmount: 0, currencyCode: 'EGP' };
   }
 
+  const returnShipmentIds = new Set(
+    shipments.filter((s) => s.is_return_shipment).map((s) => String(s.id))
+  );
+
   const shipmentIds = shipments.map((s) => String(s.id));
 
   const { data: collections, error: collectionsError } = await supabase
     .from('logistics_order_collections')
-    .select('order_total, payment_method, driver_debt_amount')
+    .select('shipment_id, order_total, payment_method, driver_debt_amount, collection_status')
     .in('shipment_id', shipmentIds);
 
   if (collectionsError || !collections || collections.length === 0) {
     return { cashDebt: 0, transferAmount: 0, chequeAmount: 0, creditAmount: 0, currencyCode: 'EGP' };
   }
+
+  const collectedStatuses = new Set(['collected_successfully', 'collected_from_customer', 'collected']);
 
   let cashDebt = 0;
   let transferAmount = 0;
@@ -747,14 +904,20 @@ export async function fetchOrderCollectionsForPlan(
     const total = toNullableNumber(row.order_total) ?? 0;
     const method = String(row.payment_method ?? '').toLowerCase();
     const debt = toNullableNumber(row.driver_debt_amount) ?? 0;
+    const status = String(row.collection_status ?? '').toLowerCase();
+    const isReturn = returnShipmentIds.has(String(row.shipment_id ?? ''));
+    const sign = isReturn ? -1 : 1;
+
+    if (collectedStatuses.has(status)) continue;
+
     if (method === 'cash') {
-      cashDebt += debt > 0 ? debt : total;
+      cashDebt += sign * (debt > 0 ? debt : total);
     } else if (method === 'bank_transfer' || method === 'transfer') {
-      transferAmount += total;
+      transferAmount += sign * total;
     } else if (method === 'cheque') {
-      chequeAmount += total;
+      chequeAmount += sign * total;
     } else if (method === 'credit' || method === 'installments') {
-      creditAmount += total;
+      creditAmount += sign * total;
     }
   }
 

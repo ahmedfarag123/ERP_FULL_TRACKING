@@ -507,6 +507,39 @@ export async function upsertCodingProduct(input: UpsertCodingInput): Promise<str
   return result?.new_code ?? input.new_code ?? "";
 }
 
+const CODING_ODOO_TEST_URL = `${
+  import.meta.env.VITE_SUPABASE_URL ?? "https://horecasmartos.duckdns.org"
+}/functions/v1/coding-to-odoo-test`;
+
+export async function pushCodingToOdooTest(
+  codingData: UpsertCodingInput & { brand?: string | null; brand_normalized?: string | null }
+): Promise<{ success: boolean; odoo_product_id?: number; error?: string }> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) return { success: false, error: "Not authenticated" };
+
+  try {
+    const res = await fetch(CODING_ODOO_TEST_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        apikey: token,
+      },
+      body: JSON.stringify({ coding_data: codingData }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      return { success: false, error: data.error || "Failed to push to Odoo TEST" };
+    }
+    return { success: true, odoo_product_id: data.odoo_product_id };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
 export type BatchApplyResult = {
   applied?: number;
   errors?: { row?: number; new_code?: string; error?: string }[];

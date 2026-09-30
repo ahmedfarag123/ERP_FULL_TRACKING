@@ -195,14 +195,14 @@ async function syncActivityReports(syncTime, maxRows) {
     };
   }
   const fields = Array.from(fieldNames);
-  const { data: latestRow } = await supabaseAdmin.from("odoo_crm_activity_reports").select("odoo_updated_at").order("odoo_updated_at", {
+  const { data: latestRow } = await supabaseAdmin.from("odoo_crm_activity_reports").select("odoo_created_at").order("odoo_created_at", {
     ascending: false,
     nullsFirst: false
   }).limit(1).maybeSingle();
-  const lastSyncDate = buildLastSyncDate(latestRow?.odoo_updated_at ?? null);
-  const domain = fieldNames.has("write_date") ? [
+  const lastSyncDate = buildLastSyncDate(latestRow?.odoo_created_at ?? null);
+  const domain = fieldNames.has("date") ? [
     [
-      "write_date",
+      "date",
       ">",
       lastSyncDate
     ]
@@ -386,7 +386,7 @@ Deno.serve(async (req)=>{
     const authResponse = await requireOdooSyncAccess(req);
     if (authResponse) return authResponse;
     const body = req.method === "POST" ? await req.json().catch(()=>({})) : {};
-    const maxRows = Math.max(1, Math.min(Number(body?.maxRows ?? 500), 2000));
+    const maxRows = Math.max(1, Math.min(Number(body?.maxRows ?? 10000), 20000));
     const syncTime = new Date().toISOString();
     const modelResults = [];
     const modelErrors = [];

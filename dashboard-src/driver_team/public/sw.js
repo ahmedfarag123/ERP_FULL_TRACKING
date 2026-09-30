@@ -1,4 +1,4 @@
-const CACHE_NAME = 'horeca-smart-driver-v8';
+const CACHE_NAME = 'horeca-smart-driver-v9';
 const APP_SHELL = [
   '/driver/',
   '/driver/index.html',

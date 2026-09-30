@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { OfflineAction, Notification } from '@/types';
 import { fetchDriverNotifications, markDriverNotificationRead } from '@/services/driverNotifications';
-import { updateShipmentPhase } from '@/services/shipmentData';
+import { updateShipmentPhase, reportDeliveryFailure, driverUpdateShipmentItems } from '@/services/shipmentData';
 import { getPendingWrites, removePendingWrite } from '@/lib/offlineCache';
 
 export type ConnectionStatus = 'online' | 'offline' | 'syncing';
@@ -65,11 +65,40 @@ function phaseFromStatus(value: unknown) {
 
 async function replayOfflineAction(action: OfflineAction) {
   const payload = action.payload ?? {};
+
+  if (action.type === 'items_updated') {
+    const items = Array.isArray(payload.items)
+      ? (payload.items as Array<{ itemId: string; doneQuantity: number }>)
+      : [];
+    if (items.length === 0) {
+      throw new Error(`Offline action ${action.id} has no item quantities to persist.`);
+    }
+    await driverUpdateShipmentItems(action.shipmentId, items);
+    return;
+  }
+
+  if (action.type === 'failure_reported') {
+    const returnType = (stringValue(payload.returnType) as 'full' | 'partial') ?? 'full';
+    const failureReason = stringValue(payload.failureReason) ?? stringValue(payload.reason) ?? 'unknown';
+    const note = stringValue(payload.note);
+    const returnItems = Array.isArray(payload.returnItems) ? payload.returnItems as Array<{ itemId: string; productName: string; returnedQuantity: number }> : undefined;
+
+    await reportDeliveryFailure({
+      shipmentId: action.shipmentId,
+      failureReason,
+      note: note ?? undefined,
+      returnType,
+      returnItems,
+      proofPhotoPath: stringValue(payload.proofPhotoPath) ?? stringValue(payload.photoUrl) ?? null,
+    });
+    return;
+  }
+
   const nextPhase =
     stringValue(payload.nextPhase) ??
     phaseFromStatus(payload.status) ??
     (action.type === 'pod_uploaded' ? 'delivered' : null) ??
-    (action.type === 'failure_reported' ? 'failed' : null);
+    null;
 
   if (!nextPhase) {
     throw new Error(`Offline action ${action.id} is missing a shipment phase.`);

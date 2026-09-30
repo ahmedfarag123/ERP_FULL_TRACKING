@@ -62,6 +62,7 @@ export interface ShipmentOrder {
   orderId: string;
   orderNumber: string | null;
   orderTotal: number;
+  deliveredInvoiceAmount?: number | null;
   paymentTerm: string | null;
 }
 
@@ -93,6 +94,15 @@ export interface PlanCollectionCheck {
   createdAt: string;
 }
 
+export interface PaymentLeg {
+  method: CollectionPaymentMethod;
+  amount: number;
+  salesRepId?: string;
+  salesRepName?: string;
+  chequeReference?: string;
+  installmentCount?: number;
+}
+
 export interface OrderCollectionInput {
   orderId: string;
   orderNumber: string | null;
@@ -102,6 +112,7 @@ export interface OrderCollectionInput {
   salesRepName?: string;
   chequeReference?: string;
   driverNotes?: string;
+  payments?: PaymentLeg[];
 }
 
 export interface Shipment {
@@ -158,7 +169,7 @@ export interface Notification {
 
 export interface OfflineAction {
   id: string;
-  type: 'status_update' | 'note_added' | 'pod_uploaded' | 'failure_reported';
+  type: 'status_update' | 'note_added' | 'pod_uploaded' | 'failure_reported' | 'items_updated';
   shipmentId: string;
   payload: Record<string, unknown>;
   timestamp: string;

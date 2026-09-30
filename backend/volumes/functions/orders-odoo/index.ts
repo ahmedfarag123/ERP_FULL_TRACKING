@@ -32,7 +32,7 @@ function isActualSalesOrder(order) {
   const typeName = typeof order.type_name === 'string' ? order.type_name.trim().toLowerCase() : '';
   const state = String(order.state ?? '').trim().toLowerCase();
   if (typeName) {
-    return typeName === 'sales order';
+    return typeName === 'sales order' || typeName === 'أمر البيع';
   }
   if (state) {
     return ['draft', 'sent', 'sale', 'done', 'cancel'].includes(state);

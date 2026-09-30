@@ -35,6 +35,31 @@ import EmptyState from "../../../components/ui/EmptyState";
 import StatusBadge, { type StatusBadgeTone } from "../../../components/ui/StatusBadge";
 import type { DateRangeValue } from "../../../lib/date-range";
 import {
+  accountingStatusLabel,
+  collectionStatusLabel,
+  driverSourceLabel,
+  fetchShipmentDetail,
+  journalSourceLabel,
+  orderCollectionStatusLabel,
+  orderMatchSourceLabel,
+  paymentMethodLabel,
+  returnReasonLabel,
+  reviewStatusLabel,
+  checkStatusLabel,
+  phaseLabel,
+  shipmentStatusLabel,
+  journalStatusLabel,
+  systemEventNoteLabel,
+  partialLoadNoteLabel,
+  type ShipmentDetailCollection,
+  type ShipmentDetailItem,
+  type ShipmentDetailOrder,
+  type ShipmentDetailPlanCheck,
+  type ShipmentDetailPricing,
+  type ShipmentDetailResult,
+  type ShipmentDetailReturn,
+} from "../../../lib/shipmentDetail";
+import {
   assignPlanDriver,
   createPlanFromOrders,
   createPlanFromExistingShipments,
@@ -141,6 +166,13 @@ function formatMoney(value: number | null | undefined, currency = "EGP") {
     currency,
     maximumFractionDigits: 0,
   }).format(Number(value ?? 0));
+}
+
+/** Money in this schema is stored with 2 decimals, so all reconciliation compares are done
+ *  on a 2-decimal rounded copy to dodge binary float drift (e.g. 2201.9999999999998). */
+function round2(value: number | null | undefined) {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? Math.round((n + Number.EPSILON) * 100) / 100 : 0;
 }
 
 function displayDistanceKm(value: number | null | undefined) {
@@ -397,7 +429,7 @@ function LoadingRows() {
   );
 }
 
-/** Multi-select of drivers the plan is shared with (read-only viewers). */
+/** Single-select of one driver the plan is shared with (read-only viewer). */
 function PlanAssigneePicker({
   drivers,
   excludedProfileId,
@@ -415,8 +447,8 @@ function PlanAssigneePicker({
   if (selectable.length === 0) {
     return <span className="text-xs text-gray-400 dark:text-gray-500">لا يوجد سائقون إضافيون قابلون للإسناد.</span>;
   }
-  const toggle = (profileId: string) => {
-    onChange(value.includes(profileId) ? value.filter((id) => id !== profileId) : [...value, profileId]);
+  const select = (profileId: string) => {
+    onChange(value.includes(profileId) ? [] : [profileId]);
   };
   return (
     <div className="flex flex-wrap gap-2">
@@ -427,7 +459,7 @@ function PlanAssigneePicker({
           <button
             type="button"
             key={driver.id}
-            onClick={() => toggle(profileId)}
+            onClick={() => select(profileId)}
             className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
               selected
                 ? "border-emerald-500 bg-emerald-50 text-emerald-700"
@@ -1074,11 +1106,12 @@ export function LogisticsShipmentsPage() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string[]>([]);
   const [planMode, setPlanMode] = useState<"idle" | "new-plan" | "transfer">("idle");
+  const [lowValueOnly, setLowValueOnly] = useState(false);
   const [showPlanPanel, setShowPlanPanel] = useState(false);
   const query = useQuery({ queryKey: [...ROOT_QUERY, "all-shipments", dateRange[0]?.toISOString(), dateRange[1]?.toISOString()], queryFn: () => fetchAllShipments(dateRange), refetchInterval: 15000 });
 
   const filtered = (query.data ?? [])
-    .filter((row) => includesSearch([row.reference, row.customerName, row.warehouseName, row.driverName, row.shipmentStatus, row.planReference, row.planStatus], search))
+    .filter((row) => includesSearch([row.reference, row.customerName, row.salesperson, row.warehouseName, row.driverName, row.shipmentStatus, row.planReference, row.planStatus], search))
     .filter((row) => {
       const status = row.shipmentStatus;
       if (tab === "all") return true;
@@ -1087,7 +1120,8 @@ export function LogisticsShipmentsPage() {
       if (tab === "unplanned") return !row.planId && !["DELIVERED", "FINISHED", "SETTLED", "CANCELLED"].includes(String(status));
       if (tab === "cancelled") return status === "CANCELLED";
       return true;
-    });
+    })
+    .filter((row) => !lowValueOnly || (row.totalGmv != null && row.totalGmv < 3000));
 
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const selectableRows = filtered.filter((row) => !row.planId && !["DELIVERED", "FINISHED", "SETTLED", "CANCELLED"].includes(String(row.shipmentStatus)));
@@ -1124,7 +1158,7 @@ export function LogisticsShipmentsPage() {
         <ErrorNotice message={query.error instanceof Error ? query.error.message : null} />
         <AdminSection
           title="قائمة الشحنات"
-          description="تصفية حسب تاريخ التسليم أو الحالة أو البحث بالاسم/الرقم/المستودع/السائق."
+          description="تصفية حسب تاريخ التسليم أو الحالة أو القيمة أو البحث بالاسم/الرقم/المستودع/السائق."
           actions={
             <div className="flex flex-wrap gap-2">
               <SearchBox value={search} onChange={setSearch} placeholder="بحث بالرقم/العميل/المستودع/السائق" />
@@ -1164,6 +1198,13 @@ export function LogisticsShipmentsPage() {
                 );
               })}
             </div>
+            <button
+              type="button"
+              onClick={() => { setLowValueOnly((value) => !value); setPage(1); setSelected([]); }}
+              className={`h-9 rounded-full px-4 text-sm font-medium transition ${lowValueOnly ? "bg-amber-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-white/[0.04] dark:text-gray-300 dark:hover:bg-white/[0.08]"}`}
+            >
+              أقل من 3000 جنيه
+            </button>
             <span className="ms-auto inline-flex items-center text-sm font-medium text-gray-500 dark:text-gray-400">{filtered.length.toLocaleString("ar-EG")} شحنة</span>
           </div>
 
@@ -1188,6 +1229,7 @@ export function LogisticsShipmentsPage() {
                       ) : null}
                       <th className="px-4 py-3">الشحنة</th>
                       <th className="px-4 py-3">العميل</th>
+                      <th className="px-4 py-3">السيلز بيرسون</th>
                       <th className="px-4 py-3">تاريخ التسليم</th>
                       <th className="px-4 py-3">المستودع</th>
                       <th className="px-4 py-3">القيمة</th>
@@ -1220,6 +1262,7 @@ export function LogisticsShipmentsPage() {
                           ) : null}
                           <td className="px-4 py-4 font-semibold text-gray-900 dark:text-white" dir="ltr">{row.reference}</td>
                           <td className="px-4 py-4"><div className="flex items-center gap-3"><CustomerAvatar name={row.customerName ?? "عميل"} size="sm" /><span>{row.customerName ?? "--"}</span></div></td>
+                          <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{row.salesperson ?? "--"}</td>
                           <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{formatDate(row.deliveryDate)}</td>
                           <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{row.warehouseName ?? "--"}</td>
                           <td className="px-4 py-4 font-semibold">{row.totalGmv != null ? formatMoney(row.totalGmv) : "--"}</td>
@@ -1850,7 +1893,7 @@ function PlanAuditSection({ audit, shipments }: { audit: PlanAuditEvent[]; shipm
                     <span className="mr-2 font-bold text-emerald-600 dark:text-emerald-400">مسلّم بواسطة الأدمن</span>
                   ) : (
                     <span className="mr-2 text-gray-400">
-                      {ev.previousPhase ?? "-"} ← {ev.nextPhase ?? "-"}
+                      من: {phaseLabel(ev.previousPhase)} · إلى: {phaseLabel(ev.nextPhase)}
                     </span>
                   )}
                 </p>
@@ -2486,7 +2529,12 @@ export function LogisticsReturnsPage() {
 // LogisticsShipmentDetailPage
 // ============================================================================
 
-interface ShipmentDetailRecord {
+/**
+ * logistics_shipment_detail returns the shipment row whole (to_jsonb of the table row), so
+ * only the columns this page reads are declared. Everything money-related now arrives in
+ * the dedicated order/collection/returns/pricing blocks instead of being re-queried.
+ */
+interface ShipmentRow {
   id: string;
   shipment_reference: string | null;
   external_shipment_id: string | null;
@@ -2503,61 +2551,28 @@ interface ShipmentDetailRecord {
   external_order_id: string | null;
   scheduled_at: string | null;
   completed_at: string | null;
-  created_at: string;
+  created_at: string | null;
   total_gmv: number | null;
   total_weight: number | null;
   total_cbm: number | null;
   picked_up_gmv: number | null;
+  delivered_invoice_amount: number | null;
   assigned_profile_id: string | null;
   assigned_user_name: string | null;
   delivery_phase: string | null;
   move_type: string | null;
+  operation_type_name: string | null;
   notes: string | null;
   origin_ref: string | null;
   pod_image_url: string | null;
   pod_signed_at: string | null;
+  is_return_shipment: boolean | null;
+  payment_method: string | null;
+  priority: string | null;
+  route_locked: boolean | null;
 }
 
-interface ShipmentItemRecord {
-  id: string;
-  shipment_id: string;
-  product_name: string;
-  product_ref: string | null;
-  product_id: string | null;
-  requested_quantity: number;
-  reserved_quantity: number;
-  done_quantity: number;
-  move_state: string | null;
-  source: string;
-}
-
-interface ReturnItemRecord {
-  id: string;
-  return_shipment_id: string;
-  parent_shipment_id: string;
-  parent_item_id: string;
-  product_name: string | null;
-  product_ref: string | null;
-  product_id: string | null;
-  requested_quantity: number | null;
-  approved_quantity: number | null;
-  delivered_quantity: number | null;
-  returned_quantity: number;
-  received_quantity: number;
-  return_reason: string | null;
-}
-
-interface LinkedOrderRecord {
-  id: string;
-  external_order_id: string | null;
-  odoo_order_name: string | null;
-  customer_name: string | null;
-  total_amount: number | null;
-  currency_code: string | null;
-  state: string | null;
-}
-
-interface ShipmentCustomerRecord {
+interface CustomerRow {
   id: string;
   customer_name: string | null;
   customer_email: string | null;
@@ -2601,12 +2616,81 @@ async function resolveProofStorageUrl(path: string | null): Promise<string | nul
   return data.signedUrl ?? null;
 }
 
+/**
+ * The photo the driver took while collecting. It lives on the collection check,
+ * not on the shipment, so it used to be stored and never shown anywhere.
+ */
+function CollectionProofPhoto({
+  path,
+  collectedAt,
+}: {
+  path: string;
+  collectedAt?: string | null;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setUrl(null);
+    setError(null);
+    (async () => {
+      try {
+        const signed = await resolveProofStorageUrl(path);
+        if (!cancelled) setUrl(signed);
+      } catch (signErr) {
+        if (!cancelled) {
+          setError(
+            signErr instanceof Error ? signErr.message : "تعذر تحميل صورة إثبات التحصيل.",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+
+  return (
+    <div className="mt-3">
+      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+        صورة إثبات التحصيل
+        {collectedAt ? ` · ${formatDateTime(collectedAt)}` : ""}
+      </p>
+      {error ? (
+        <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{error}</p>
+      ) : !url ? (
+        <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">جاري تحميل الصورة...</p>
+      ) : (
+        <a href={url} target="_blank" rel="noreferrer">
+          <img
+            src={url}
+            alt="إثبات التحصيل"
+            className="mt-2 max-h-72 rounded-xl border border-gray-200 object-contain dark:border-gray-800"
+          />
+        </a>
+      )}
+    </div>
+  );
+}
+
 function formatShipmentAmount(value: number | null | undefined, currency = "EGP") {
   if (value == null || Number.isNaN(value)) return "--";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency,
     maximumFractionDigits: 0,
+  }).format(value);
+}
+
+/** Two decimals: order totals carry piastres (e.g. 9,323.75) and must not be rounded away. */
+function formatShipmentMoney(value: number | null | undefined, currency = "EGP") {
+  if (value == null || Number.isNaN(value)) return "--";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
 }
 
@@ -2629,97 +2713,81 @@ function ShipmentDetailCardHeader({ title, subtitle }: { title: string; subtitle
   );
 }
 
+type ShipmentMoneyTone = "default" | "strong" | "success" | "warning" | "danger";
+
+/** A labelled money line. `value` is pre-formatted because some rows show a state instead
+ *  of a number (e.g. "لم يُسلّم بعد" when nothing has been delivered yet). */
+function ShipmentMoneyRow({
+  label,
+  value,
+  hint,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: ShipmentMoneyTone;
+}) {
+  const valueClass =
+    tone === "strong"
+      ? "text-base font-semibold text-gray-900 dark:text-white"
+      : tone === "success"
+        ? "text-sm font-semibold text-emerald-700 dark:text-emerald-300"
+        : tone === "warning"
+          ? "text-sm font-semibold text-amber-700 dark:text-amber-300"
+          : tone === "danger"
+            ? "text-sm font-semibold text-rose-700 dark:text-rose-300"
+            : "text-sm font-semibold text-gray-800 dark:text-gray-200";
+
+  return (
+    <div className="rounded-2xl border border-gray-200 p-4 dark:border-gray-800">
+      <dt className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</dt>
+      <dd className={`mt-1 ${valueClass}`} dir="ltr">
+        {value}
+      </dd>
+      {hint ? (
+        <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500" dir="auto">
+          {hint}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function LogisticsShipmentDetailPage() {
   const { shipmentId } = useParams<{ shipmentId: string }>();
-  const [shipment, setShipment] = useState<ShipmentDetailRecord | null>(null);
-  const [shipmentItems, setShipmentItems] = useState<ShipmentItemRecord[]>([]);
-  const [returnItems, setReturnItems] = useState<ReturnItemRecord[]>([]);
-  const [linkedOrder, setLinkedOrder] = useState<LinkedOrderRecord | null>(null);
-  const [customer, setCustomer] = useState<ShipmentCustomerRecord | null>(null);
+  const [detail, setDetail] = useState<ShipmentDetailResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [proofPhotoUrl, setProofPhotoUrl] = useState<string | null>(null);
   const [proofPhotoError, setProofPhotoError] = useState<string | null>(null);
 
-  const loadShipment = useCallback(async () => {
+  /**
+   * One RPC replaces the five PostgREST queries this page used to run. It is
+   * SECURITY INVOKER, so RLS still decides what the caller may read.
+   */
+  const loadDetail = useCallback(async () => {
     if (!shipmentId) return;
 
     try {
       setIsLoading(true);
       setError(null);
-
-      const [shipmentRes, itemsRes, returnsRes] = await Promise.all([
-        supabase
-          .from("logistics_shipments")
-          .select(
-            "id, shipment_reference, external_shipment_id, shipment_status, shipment_state, customer_id, customer_name, customer_phone, linked_order_id, warehouse_id, warehouse_name, plan_id, odoo_order_name, external_order_id, scheduled_at, completed_at, created_at, total_gmv, total_weight, total_cbm, picked_up_gmv, assigned_profile_id, assigned_user_name, delivery_phase, move_type, notes, origin_ref, pod_image_url, pod_signed_at",
-          )
-          .eq("id", shipmentId)
-          .single(),
-        supabase
-          .from("logistics_shipment_items")
-          .select("id, shipment_id, product_name, product_ref, product_id, requested_quantity, reserved_quantity, done_quantity, move_state, source")
-          .eq("shipment_id", shipmentId)
-          .order("created_at", { ascending: true }),
-        supabase
-          .from("logistics_return_shipment_items")
-          .select("id, return_shipment_id, parent_shipment_id, parent_item_id, product_name, product_ref, product_id, requested_quantity, approved_quantity, delivered_quantity, returned_quantity, received_quantity, return_reason")
-          .eq("parent_shipment_id", shipmentId),
-      ]);
-
-      if (shipmentRes.error) throw shipmentRes.error;
-      if (itemsRes.error) throw itemsRes.error;
-      if (returnsRes.error) throw returnsRes.error;
-
-      const shipmentRecord = shipmentRes.data as ShipmentDetailRecord;
-      setShipment(shipmentRecord);
-      setShipmentItems((itemsRes.data ?? []) as ShipmentItemRecord[]);
-      setReturnItems((returnsRes.data ?? []) as ReturnItemRecord[]);
-
-      if (shipmentRecord.linked_order_id) {
-        const { data: orderData, error: orderError } = await supabase
-          .from("orders")
-          .select("id, external_order_id, odoo_order_name, customer_name, total_amount, currency_code, state")
-          .eq("id", shipmentRecord.linked_order_id)
-          .maybeSingle();
-
-        if (orderError) throw orderError;
-        setLinkedOrder((orderData as LinkedOrderRecord | null) ?? null);
-      } else {
-        setLinkedOrder(null);
-      }
-
-      if (shipmentRecord.customer_id) {
-        const { data: custData, error: custError } = await supabase
-          .from("customers")
-          .select("id, customer_name, customer_email, phone_number, governorate, district, place")
-          .eq("id", shipmentRecord.customer_id)
-          .maybeSingle();
-
-        if (custError) throw custError;
-        setCustomer((custData as ShipmentCustomerRecord | null) ?? null);
-      } else {
-        setCustomer(null);
-      }
+      setDetail(await fetchShipmentDetail(shipmentId));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "تعذر تحميل تفاصيل الشحنة.");
-      setShipment(null);
-      setLinkedOrder(null);
-      setCustomer(null);
-      setShipmentItems([]);
-      setReturnItems([]);
+      setDetail(null);
     } finally {
       setIsLoading(false);
     }
   }, [shipmentId]);
 
   useEffect(() => {
-    void loadShipment();
-  }, [loadShipment]);
+    void loadDetail();
+  }, [loadDetail]);
 
   useEffect(() => {
     let cancelled = false;
-    const path = shipment?.pod_image_url ?? null;
+    const path = (detail?.shipment as { pod_image_url?: string | null } | null)?.pod_image_url ?? null;
     setProofPhotoUrl(null);
     setProofPhotoError(null);
     if (!path) return;
@@ -2734,7 +2802,7 @@ export function LogisticsShipmentDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [shipment?.pod_image_url, shipment]);
+  }, [(detail?.shipment as { pod_image_url?: string | null } | null)?.pod_image_url, detail]);
 
   useEffect(() => {
     if (!shipmentId) return;
@@ -2744,7 +2812,7 @@ export function LogisticsShipmentDetailPage() {
     const scheduleRefresh = () => {
       if (refreshTimeout) clearTimeout(refreshTimeout);
       refreshTimeout = setTimeout(() => {
-        void loadShipment();
+        void loadDetail();
       }, 300);
     };
 
@@ -2761,25 +2829,7 @@ export function LogisticsShipmentDetailPage() {
       if (refreshTimeout) clearTimeout(refreshTimeout);
       void supabase.removeChannel(channel);
     };
-  }, [shipmentId, loadShipment]);
-
-  const itemCount = shipmentItems.length;
-  const totalRequestedQty = useMemo(
-    () => shipmentItems.reduce((sum, item) => sum + Number(item.requested_quantity ?? 0), 0),
-    [shipmentItems],
-  );
-  const totalDoneQty = useMemo(
-    () => shipmentItems.reduce((sum, item) => sum + Number(item.done_quantity ?? 0), 0),
-    [shipmentItems],
-  );
-  const totalReturnedQty = useMemo(
-    () => returnItems.reduce((sum, item) => sum + Number(item.returned_quantity ?? 0), 0),
-    [returnItems],
-  );
-  const totalReceivedQty = useMemo(
-    () => returnItems.reduce((sum, item) => sum + Number(item.received_quantity ?? 0), 0),
-    [returnItems],
-  );
+  }, [shipmentId, loadDetail]);
 
   if (isLoading) {
     return (
@@ -2801,7 +2851,9 @@ export function LogisticsShipmentDetailPage() {
     );
   }
 
-  if (error || !shipment) {
+  // `detail` is a well-formed object even when RLS hides every row, so the not-found
+  // branch has to key off the shipment row itself, not off the envelope.
+  if (error || !detail || !detail.shipment) {
     return (
       <>
         <PageMeta title="تفاصيل الشحنة" description="لم يتم العثور على الشحنة" />
@@ -2823,8 +2875,121 @@ export function LogisticsShipmentDetailPage() {
     );
   }
 
-  const shipmentLabel = shipment.shipment_reference || shipment.external_shipment_id || shipment.id.slice(0, 8);
+  const shipment = (detail.shipment ?? {}) as Partial<ShipmentRow>;
+  const customer = (detail.customer ?? null) as Partial<CustomerRow> | null;
+  const order = detail.order;
+  const pricing = detail.pricing;
+  const driver = detail.driver;
+  const collection = detail.collection;
+  const collectionExists = Boolean(collection?.exists);
+  const orderCollection = detail.order_collection;
+  const planCheck = detail.plan_check;
+  const items = detail.items;
+  const returns = detail.returns;
+  const journal = detail.journal;
+  const events = detail.events;
+
+  /**
+   * What the customer actually tendered. The order row records it directly; the
+   * shipment row is only a roll-up, so the order wins whenever the two disagree.
+   */
+  const collectionPaymentMethod =
+    orderCollection?.payment_method ?? collection?.payment_method ?? null;
+
+  /**
+   * pending_delivery_amount is the TOTAL value of the collection, not a remainder,
+   * so what is still owed is that total minus what was actually collected, plus
+   * any cash still sitting with the driver.
+   */
+  const outstandingAmount = Math.max(
+    Number(collection?.outstanding_amount ?? 0),
+    Number(collection?.driver_debt_amount ?? 0),
+  );
+
+  const currency = pricing?.currency ?? order?.currency_code ?? collection?.currency_code ?? "EGP";
+  const money = (value: number | null | undefined) => formatShipmentMoney(value, currency);
+
+  /**
+   * The collection row is written when the driver submits, which can happen BEFORE a
+   * return is recorded. Its pending_delivery_amount therefore keeps the gross order
+   * total even though the net collectible dropped once the return landed. When the two
+   * disagree we must show the correct figure AND say plainly that the stored one is
+   * stale, rather than presenting a number that contradicts the amounts card.
+   */
+  const netCollectible = Number(collection?.net_collectible ?? 0);
+  const pendingMatchesNet = collection?.pending_matches_net !== false;
+  const stalePendingDelta =
+    !pendingMatchesNet && collection?.pending_delivery_amount != null
+      ? Number(collection.pending_delivery_amount) - netCollectible
+      : 0;
+
+  /**
+   * A collection row is created up-front for every shipment, so its mere existence
+   * does not mean money was ever tendered. Only a submitted event proves that.
+   */
+  const hasCollectionSubmitted = events.some(
+    (event) => event.next_phase === "collection_submitted",
+  );
+  const collectionIsPlaceholder = collectionExists && !hasCollectionSubmitted;
+
+  const returnShipment = collection?.return_shipment ?? null;
+
+  /**
+   * The auto credit note is written against the RETURN shipment, so it used to fall
+   * outside this page entirely and a wrong credit stayed invisible. Now that the
+   * journal includes it, compare what was posted against the value actually returned.
+   * Any surplus is reported, never corrected.
+   */
+  const postedReversalTotal = journal
+    .filter((entry) => entry.source_type === "reversal")
+    .reduce((sum, entry) => sum + Number(entry.posted_total ?? 0), 0);
+  const expectedCredit = Number(pricing?.returns_value ?? 0);
+  const creditSurplus = postedReversalTotal - expectedCredit;
+
+  const shipmentLabel = shipment.shipment_reference || shipment.external_shipment_id || shipment.id?.slice(0, 8) || "--";
   const statusBadge = resolveShipmentDetailBadge(shipment.shipment_status);
+
+  const itemCount = items.length;
+  const totalRequestedQty = pricing?.requested_qty ?? 0;
+  const totalDoneQty = pricing?.done_qty ?? 0;
+  const totalReturnedQty = pricing?.returned_qty ?? 0;
+  const totalReceivedQty = pricing?.returns_received_qty ?? 0;
+
+  /**
+   * A shipment whose lines are still all pending has delivered_value = 0, which must NOT
+   * be shown as "this shipment is worth nothing" — that is a different statement.
+   */
+  const nothingDeliveredYet = (pricing?.done_qty ?? 0) === 0 && (pricing?.requested_qty ?? 0) > 0;
+  const deliveredValueLabel = nothingDeliveredYet ? "لم يُسلّم بعد" : money(pricing?.delivered_value);
+  const netValueLabel = nothingDeliveredYet ? "لم يُسلّم بعد" : money(pricing?.net_value);
+
+  const unpricedItems = pricing?.unpriced_items ?? 0;
+  const unpricedReturns = pricing?.unpriced_returns ?? 0;
+  const priceDupes = pricing?.price_dupes ?? 0;
+  const orderPriceMissing = !order || order.full_order_price == null;
+
+  /**
+   * Reconciliation. net_value == delivered_value, and delivered is already net of every
+   * recorded return: net = requested - returned, per line. The amount owed is what the
+   * customer actually kept.
+   */
+  const fullOrderPrice = order?.full_order_price ?? null;
+  const deliveredValue = pricing?.delivered_value ?? 0;
+  const netValue = pricing?.net_value ?? 0;
+  const unfulfilledValue = pricing?.unfulfilled_value ?? 0;
+  const unfulfilledQty = pricing?.unfulfilled_qty ?? 0;
+  const returnsValue = pricing?.returns_value ?? 0;
+  const netMatchesDelivered = round2(netValue) === round2(deliveredValue);
+  const hasUnfulfilled = unfulfilledQty > 0 || unfulfilledValue > 0;
+
+
+  const driverNames = driver?.names ?? [];
+  const primaryDriver = driver?.primary ?? null;
+  const coDrivers = driver?.co_drivers ?? [];
+  const driverMissing = driverNames.length === 0;
+  const salesperson = order?.salesperson ?? null;
+
+  const driverHoldsMoney = Boolean(collection?.driver_holds_money);
 
   return (
     <>
@@ -2848,6 +3013,11 @@ export function LogisticsShipmentDetailPage() {
                     شحنة <span dir="ltr">#{shipmentLabel}</span>
                   </h1>
                   <StatusBadge label={statusBadge.label} tone={statusBadge.tone} />
+                  {shipment.is_return_shipment ? (
+                    <span className="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
+                      شحنة مرتجع
+                    </span>
+                  ) : null}
                 </div>
 
                 <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-gray-500 dark:text-gray-400">
@@ -2863,11 +3033,11 @@ export function LogisticsShipmentDetailPage() {
                       {shipment.warehouse_name || "--"}
                     </strong>
                   </span>
-                  {linkedOrder ? (
+                  {order ? (
                     <span>
                       الطلب:{" "}
                       <strong className="font-semibold text-gray-800 dark:text-gray-100">
-                        {linkedOrder.odoo_order_name || linkedOrder.external_order_id || "--"}
+                        {order.odoo_order_name || order.external_order_id || "--"}
                       </strong>
                     </span>
                   ) : null}
@@ -2895,9 +3065,16 @@ export function LogisticsShipmentDetailPage() {
                 </p>
               </div>
               <div className="min-w-0">
-                <p className="text-xs font-medium text-gray-500 dark:text-gray-400">قيمة GMV</p>
-                <p className="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">
-                  {formatShipmentAmount(shipment.total_gmv)}
+                {/* The old "قيمة GMV" tile read logistics_shipments.total_gmv, which is
+                    populated on 3 of 6200 delivered shipments and therefore always showed
+                    "--". It is replaced by the real order price. GMV, when it does exist,
+                    is still shown inside the financial summary. */}
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400">سعر الأوردر</p>
+                <p
+                  className={`mt-1 truncate text-sm font-semibold ${orderPriceMissing ? "text-gray-400 dark:text-gray-500" : "text-gray-900 dark:text-white"}`}
+                  dir="ltr"
+                >
+                  {orderPriceMissing ? "غير متاح" : money(order?.full_order_price)}
                 </p>
               </div>
               <div className="min-w-0">
@@ -2911,6 +3088,512 @@ export function LogisticsShipmentDetailPage() {
         </ShipmentDetailCard>
 
         <div className="mt-5 space-y-5">
+          {/* ── السعر الكامل ───────────────────────────────────────────── */}
+          <ShipmentDetailCard>
+            <ShipmentDetailCardHeader
+              title="السعر الكامل"
+              subtitle="سعر الأوردر كامل كما ورد من أودو، وقيمة ما سُلِّم فعليًا من هذه الشحنة"
+            />
+
+            <div className="px-5 py-5">
+              <div className="rounded-2xl border border-brand-100 bg-brand-25/60 p-5 dark:border-white/[0.06] dark:bg-white/[0.03]">
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400">سعر الأوردر (كامل)</p>
+                <p
+                  className={`mt-1 text-3xl font-semibold tracking-tight ${orderPriceMissing ? "text-gray-400 dark:text-gray-500" : "text-gray-900 dark:text-white"}`}
+                  dir="ltr"
+                >
+                  {orderPriceMissing ? "غير متاح" : money(order?.full_order_price)}
+                </p>
+                {orderPriceMissing ? (
+                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    لم يتم العثور على طلب مرتبط بهذه الشحنة، لذلك لا يوجد سعر طلب لعرضه.
+                  </p>
+                ) : order?.match_source ? (
+                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    {orderMatchSourceLabel(order.match_source)}
+                  </p>
+                ) : null}
+              </div>
+
+              <dl className="mt-5 grid gap-3 sm:grid-cols-2">
+                <ShipmentMoneyRow
+                  label="قبل الضريبة"
+                  value={money(order?.amount_untaxed)}
+                  hint={
+                    order?.amount_undiscounted != null && order?.amount_untaxed != null
+                      && order.amount_undiscounted !== order.amount_untaxed
+                      ? `قبل الخصم ${money(order.amount_undiscounted)}`
+                      : undefined
+                  }
+                />
+                <ShipmentMoneyRow
+                  label="قيمة الأصناف المسلّمة"
+                  value={deliveredValueLabel}
+                  hint={
+                    nothingDeliveredYet
+                      ? "لم يتم تثبيت أي كمية مسلّمة على هذه الشحنة بعد"
+                      : `${totalDoneQty.toLocaleString("ar-EG")} من ${totalRequestedQty.toLocaleString("ar-EG")} مطلوب`
+                  }
+                />
+                {hasUnfulfilled ? (
+                  <ShipmentMoneyRow
+                    label="مطلوب ولم يُسلَّم"
+                    value={money(unfulfilledValue)}
+                    hint={`${unfulfilledQty.toLocaleString("ar-EG")} وحدة من الطلب لم تُسلَّم، وتُعرض للعلم ولا تُخصم من المستحق.`}
+                    tone="warning"
+                  />
+                ) : null}
+                {returnsValue > 0 ? (
+                  <ShipmentMoneyRow
+                    label="مرتجعات ضمن العجز"
+                    value={money(returnsValue)}
+                    hint="مرتجعات من داخل الكمية التي لم تُسلَّم أصلًا، لذلك لا تُخصم من المستحق."
+                    tone="default"
+                  />
+                ) : null}
+                <ShipmentMoneyRow
+                  label="المستحق على العميل (المسلَّم)"
+                  value={netValueLabel}
+                  hint="المبلغ المطلوب تحصيله = قيمة ما سُلِّم فعليًا بعد خصم المرتجعات المسجلة."
+                  tone="strong"
+                />
+              </dl>
+
+              {!netMatchesDelivered ? (
+                <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+                  <p className="font-semibold">المستحق لا يساوي قيمة الأصناف المسلّمة.</p>
+                  <p className="mt-1">
+                    المسلّم <span dir="ltr">{money(deliveredValue)}</span> بينما المستحق{" "}
+                    <span dir="ltr">{money(netValue)}</span>.
+                  </p>
+                </div>
+              ) : null}
+
+              {pricing?.delivered_invoice_amount != null ? (
+                <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600 dark:border-gray-700 dark:bg-white/[0.03] dark:text-gray-300">
+                  <p>
+                    المفوتر فعليًا لهذه الشحنة (صافي قيمة التسليم):{" "}
+                    <span dir="ltr" className="font-semibold text-gray-900 dark:text-white">
+                      {money(pricing.delivered_invoice_amount)}
+                    </span>
+                  </p>
+                  {order?.amount_to_invoice != null ? (
+                    <p className="mt-1">
+                      المتبقي للفوترة في أودو: <span dir="ltr">{money(order.amount_to_invoice)}</span>
+                      {order.amount_to_invoice === 0
+                        ? " — أي لا يوجد باقي مطلوب فوترته لهذه الشحنة."
+                        : " — وهو لا يساوي بالضرورة سعر الأوردر، لأن التسليم الجزئي لا يُفوتر كاملًا."}
+                    </p>
+                  ) : null}
+                </div>
+              ) : order?.amount_to_invoice != null ? (
+                <p className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs text-gray-500 dark:bg-white/[0.03] dark:text-gray-400">
+                  المتبقي للفوترة في أودو: <span dir="ltr">{money(order.amount_to_invoice)}</span>
+                </p>
+              ) : null}
+
+              {pricing?.gmv != null ? (
+                <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                  قيمة GMV المسجلة على الشحنة: <span dir="ltr">{money(pricing.gmv)}</span>
+                </p>
+              ) : null}
+
+              {unpricedItems > 0 || unpricedReturns > 0 || priceDupes > 0 ? (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                  {unpricedItems > 0 ? (
+                    <p>
+                      {unpricedItems.toLocaleString("ar-EG")} صنف لم يُعثر له على سعر في بيانات الطلب، ولم
+                      يُحتسب له أي مبلغ.
+                    </p>
+                  ) : null}
+                  {unpricedReturns > 0 ? (
+                    <p>{unpricedReturns.toLocaleString("ar-EG")} سطر مرتجع بدون سعر.</p>
+                  ) : null}
+                  {priceDupes > 0 ? (
+                    <p>
+                      يوجد {priceDupes.toLocaleString("ar-EG")} صنف مكرر في سطور الطلب؛ تم اعتماد أحدث
+                      سطر فقط لكل صنف.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </ShipmentDetailCard>
+
+          {/* ── السائق ومندوب البيع ────────────────────────────────────── */}
+          <ShipmentDetailCard>
+            <ShipmentDetailCardHeader title="السائق ومندوب البيع" />
+
+            <div className="grid gap-3 px-5 py-5 sm:grid-cols-2">
+              <div className="rounded-2xl border border-gray-200 p-4 dark:border-gray-800">
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400">السائق</p>
+                {driverMissing ? (
+                  <p className="mt-2 text-sm font-semibold text-amber-700 dark:text-amber-300">
+                    لا يوجد سائق مسجّل لهذه الشحنة
+                  </p>
+                ) : (
+                  <>
+                    <p className="mt-2 text-sm font-semibold text-gray-900 dark:text-white">
+                      {primaryDriver}
+                    </p>
+                    {driver?.source ? (
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {driverSourceLabel(driver.source)}
+                      </p>
+                    ) : null}
+                    {coDrivers.length > 0 ? (
+                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                        مشارك: <span className="font-medium text-gray-700 dark:text-gray-200">{coDrivers.join("، ")}</span>
+                      </p>
+                    ) : null}
+                  </>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 p-4 dark:border-gray-800">
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400">مندوب البيع</p>
+                {salesperson ? (
+                  <p className="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{salesperson}</p>
+                ) : (
+                  <p className="mt-2 text-sm font-semibold text-gray-400 dark:text-gray-500">
+                    غير محدد
+                  </p>
+                )}
+                {order?.payment_method ? (
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    طريقة الدفع: {paymentMethodLabel(order.payment_method)}
+                  </p>
+                ) : null}
+              </div>
+
+              {customer?.phone_number || customer?.governorate || customer?.district ? (
+                <div className="rounded-2xl border border-gray-200 p-4 sm:col-span-2 dark:border-gray-800">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">العميل</p>
+                  <p className="mt-2 text-sm font-semibold text-gray-900 dark:text-white">
+                    {customer?.customer_name || shipment.customer_name || "--"}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {[
+                      customer?.phone_number,
+                      [customer?.governorate, customer?.district].filter(Boolean).join(" - ") || null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "--"}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </ShipmentDetailCard>
+
+          {/* ── التحصيل ─────────────────────────────────────────────────── */}
+          <ShipmentDetailCard>
+            <ShipmentDetailCardHeader
+              title="التحصيل"
+              subtitle="المبالغ الثلاثة بحالاتها الفعلية: مستحق، تم تحصيله بنجاح، ومحصّل من العميل"
+            />
+
+            {!collectionExists ? (
+              <div className="flex min-h-[160px] items-center px-5 py-12">
+                <EmptyState
+                  title="لا يوجد تحصيل مسجّل"
+                  description="لم يتم تسجيل أي عملية تحصيل مرتبطة بهذه الشحنة."
+                />
+              </div>
+            ) : (
+              <div className="px-5 py-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="inline-flex items-center rounded-full bg-brand-25 px-3 py-1 text-xs font-semibold text-gray-700 dark:bg-white/[0.06] dark:text-gray-200">
+                    {collectionStatusLabel(collection?.collection_status)}
+                  </span>
+                  {/* The order row is the record of what was actually tendered; the
+                      shipment row is a roll-up of it. */}
+                  {collectionPaymentMethod ? (
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {paymentMethodLabel(collectionPaymentMethod)}
+                    </span>
+                  ) : null}
+                </div>
+
+                {collectionIsPlaceholder ? (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                    <p className="font-semibold">سجل تحصيل مبدئي — لم يُسجَّل تحصيل فعلي بعد.</p>
+                    <p className="mt-1">
+                      هذا السجل يُنشأ تلقائيًا مع كل شحنة، ووجوده لا يعني أن العميل دفع أي مبلغ.
+                      الاعتماد عليه كمحصّل فعلي خطأ.
+                    </p>
+                  </div>
+                ) : null}
+
+                <dl className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <ShipmentMoneyRow
+                    label={pendingMatchesNet ? "إجمالي قيمة التحصيل" : "إجمالي قيمة التحصيل (المسجَّل)"}
+                    value={money(collection?.pending_delivery_amount)}
+                    hint={
+                      pendingMatchesNet
+                        ? "القيمة المسجَّلة لهذه الشحنة، ويقابلها ما تم تحصيله"
+                        : "قيمة قديمة لم تُحدَّث بعد تسجيل المرتجع — راجع التنبيه بالأسفل"
+                    }
+                    tone={pendingMatchesNet ? undefined : "danger"}
+                  />
+                  <ShipmentMoneyRow
+                    label="تم تحصيله بنجاح"
+                    value={money(collection?.collected_successfully_amount)}
+                    tone={
+                      (collection?.collected_successfully_amount ?? 0) > 0 ? "success" : "default"
+                    }
+                    hint="تحويل بنكي أو شيك — وصل للشركة دون المرور على السائق"
+                  />
+                  <ShipmentMoneyRow
+                    label="محصّل من العميل"
+                    value={money(collection?.collected_from_customer)}
+                    tone={(collection?.collected_from_customer ?? 0) > 0 ? "warning" : "default"}
+                    hint="نقدي ما زال مع السائق"
+                  />
+                  <ShipmentMoneyRow
+                    label="دين السائق"
+                    value={money(collection?.driver_debt_amount)}
+                    tone={(collection?.driver_debt_amount ?? 0) > 0 ? "danger" : "default"}
+                  />
+                </dl>
+
+                {outstandingAmount > 0 ? (
+                  <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                    المتبقي غير المحصّل: <span className="font-semibold">{money(outstandingAmount)}</span>
+                  </p>
+                ) : null}
+
+                {!pendingMatchesNet ? (
+                  <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+                    <p className="font-semibold">المبلغ المسجَّل للتحصيل لا يطابق صافي المستحق.</p>
+                    <dl className="mt-2 space-y-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <dt>المسجَّل في سجل التحصيل</dt>
+                        <dd className="font-semibold" dir="ltr">
+                          {money(collection?.pending_delivery_amount)}
+                        </dd>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <dt>الصحيح حسب صافي التسليم بعد المرتجع</dt>
+                        <dd className="font-semibold" dir="ltr">
+                          {money(netCollectible)}
+                        </dd>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-rose-200 pt-1 dark:border-rose-500/30">
+                        <dt>الفرق</dt>
+                        <dd className="font-semibold" dir="ltr">
+                          {money(stalePendingDelta)}
+                        </dd>
+                      </div>
+                    </dl>
+                    <p className="mt-2">
+                      السبب: سجل التحصيل كُتب قبل تسجيل المرتجع، فبقي على قيمة الأوردر الخام.
+                      الرقم الصحيح للتحصيل هو الصافي أعلاه. هذا تنبيه عرض فقط — لم يتم تعديل أي
+                      مبلغ مخزَّن.
+                    </p>
+                    {returnShipment ? (
+                      <p className="mt-2">
+                        شحنة المرتجع:{" "}
+                        <span dir="ltr">{returnShipment.reference ?? "بلا مرجع"}</span> ·{" "}
+                        {shipmentStatusLabel(returnShipment.status)}
+                        {returnShipment.completed_at
+                          ? ` · استُلم ${formatDateTime(returnShipment.completed_at)}`
+                          : " · لم تُستلم بعد في المخزن"}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {driverHoldsMoney ? (
+                  <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+                    تم تحصيل المبلغ من العميل وهو ما زال مع السائق، ولم يُسلَّم للإدارة بعد.
+                  </div>
+                ) : null}
+
+                {collection?.accounting_status ? (
+                  <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+                    الحالة المحاسبية: {accountingStatusLabel(collection.accounting_status)}
+                    {collection?.admin_confirmed_at
+                      ? ` · تم التأكيد ${formatDateTime(collection.admin_confirmed_at)}`
+                      : ""}
+                  </p>
+                ) : null}
+
+                {orderCollection?.exists ? (
+                  <div className="mt-4 rounded-2xl border border-gray-200 p-4 dark:border-gray-800">
+                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                      سجل التحصيل على مستوى الطلب
+                    </p>
+                    <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+                      <ShipmentMoneyRow
+                        label="إجمالي الطلب (مفوتر)"
+                        value={money(orderCollection.order_total)}
+                        hint="قيمة الفاتورة، وليست سعر الأوردر الكامل"
+                      />
+                      <ShipmentMoneyRow
+                        label="المحصّل"
+                        value={money(orderCollection.collected_amount)}
+                        tone={(orderCollection.collected_amount ?? 0) > 0 ? "success" : "default"}
+                        hint="كل ما دفعه العميل، أيًا كانت الطريقة"
+                      />
+                      <ShipmentMoneyRow
+                        label="دين السائق"
+                        value={money(orderCollection.driver_debt_amount)}
+                        tone={(orderCollection.driver_debt_amount ?? 0) > 0 ? "danger" : "default"}
+                      />
+                    </dl>
+                    <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                      حالة التحصيل: {orderCollectionStatusLabel(orderCollection.collection_status)}
+                      {orderCollection.sales_rep_name ? ` · المندوب: ${orderCollection.sales_rep_name}` : ""}
+                      {orderCollection.collected_at
+                        ? ` · ${formatDateTime(orderCollection.collected_at)}`
+                        : ""}
+                    </p>
+                    {orderCollection.legs.length > 0 ? (
+                      <ul className="mt-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
+                        {orderCollection.legs.map((leg) => (
+                          <li key={leg.id} className="flex flex-wrap items-center gap-2">
+                            <span>{paymentMethodLabel(leg.payment_method)}</span>
+                            <span dir="ltr" className="font-medium text-gray-700 dark:text-gray-200">
+                              {money(leg.amount)}
+                            </span>
+                            {leg.installment_count != null ? (
+                              <span>× {leg.installment_count} قسط</span>
+                            ) : null}
+                            {leg.transfer_responsible_name ? (
+                              <span>· المسؤول عن التحويل: {leg.transfer_responsible_name}</span>
+                            ) : null}
+                            {leg.cheque_reference ? (
+                              <span>· رقم الشيك: {leg.cheque_reference}</span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {orderCollection.sibling_rows != null && orderCollection.sibling_rows > 1 ? (
+                      <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+                        يوجد {orderCollection.sibling_rows} سجلات تحصيل مرتبطة بهذه الشحنة؛ المعروض هو
+                        سجل الطلب المطابق.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {planCheck?.exists ? (
+                  <div className="mt-4 rounded-2xl border border-gray-200 p-4 dark:border-gray-800">
+                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                      مراجعة السائق للمحصّل
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-gray-900 dark:text-white">
+                      {checkStatusLabel(planCheck.check_status)}
+                      <span className="ms-2 text-xs font-normal text-gray-500 dark:text-gray-400">
+                        ({reviewStatusLabel(planCheck.review_status)})
+                      </span>
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {planCheck.driver_name ? `بواسطة: ${planCheck.driver_name}` : ""}
+                      {planCheck.sales_rep_name ? ` · المندوب: ${planCheck.sales_rep_name}` : ""}
+                      {planCheck.created_at ? ` · ${formatDateTime(planCheck.created_at)}` : ""}
+                    </p>
+                    {planCheck.reason ? (
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        السبب: {planCheck.reason}
+                      </p>
+                    ) : null}
+                    {planCheck.driver_notes ? (
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        ملاحظات السائق: {planCheck.driver_notes}
+                      </p>
+                    ) : null}
+                    {planCheck.admin_notes ? (
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        ملاحظات الإدارة: {planCheck.admin_notes}
+                      </p>
+                    ) : null}
+                    {planCheck.proof_photo_url ? (
+                      <CollectionProofPhoto
+                        path={planCheck.proof_photo_url}
+                        collectedAt={planCheck.created_at}
+                      />
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </ShipmentDetailCard>
+
+          {/* ── سجل الأحداث ─────────────────────────────────────────────── */}
+          <ShipmentDetailCard>
+            <ShipmentDetailCardHeader
+              title="سجل الأحداث"
+              subtitle="كل ما جرى على الشحنة بالتسلسل: بدء خط التسليم، تأكيد التسليم، ثم التحصيل"
+            />
+
+            {events.length === 0 ? (
+              <div className="flex min-h-[160px] items-center px-5 py-12">
+                <EmptyState
+                  title="لا يوجد سجل أحداث"
+                  description="لم تُسجَّل أي أحداث على هذه الشحنة بعد."
+                />
+              </div>
+            ) : (
+              <ol className="space-y-3 px-5 py-5">
+                {events.map((event) => (
+                  <li
+                    key={event.id}
+                    className="flex gap-3 rounded-2xl border border-gray-200 p-3 dark:border-gray-800"
+                  >
+                    <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-brand-500" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                        {event.next_phase === "collection_submitted"
+                          ? "تم تسجيل التحصيل"
+                          : (systemEventNoteLabel(event.note)
+                              ?? partialLoadNoteLabel((event.note ?? "").trim())
+                              ?? event.note
+                              ?? phaseLabel(event.next_phase)
+                              ?? "--")}
+                      </p>
+                      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                        {formatDateTime(event.created_at)}
+                        {event.actor_name ? ` · بواسطة ${event.actor_name}` : ""}
+                        {event.previous_phase && event.next_phase
+                          ? event.next_phase === "collection_submitted"
+                            ? ` · بعد: ${phaseLabel(event.previous_phase)}`
+                            : ` · من: ${phaseLabel(event.previous_phase)} · إلى: ${phaseLabel(event.next_phase)}`
+                          : event.next_phase
+                            ? ` · ${phaseLabel(event.next_phase)}`
+                            : ""}
+                      </p>
+                      {event.next_phase === "collection_submitted"
+                        ? (() => {
+                            const payload = (event.payload ?? {}) as Record<string, unknown>;
+                            const num = (key: string) => {
+                              const value = Number(payload[key] ?? 0);
+                              return Number.isFinite(value) ? value : 0;
+                            };
+                            const collected = num("collected_total") || num("cash_total");
+                            if (collected <= 0) return null;
+                            return (
+                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                محصّل: {money(collected)}
+                                {num("transfer_total") > 0
+                                  ? ` · تحويل بنكي/شيك: ${money(num("transfer_total"))}`
+                                  : ""}
+                                {num("credit_total") > 0
+                                  ? ` · آجل: ${money(num("credit_total"))}`
+                                  : ""}
+                              </p>
+                            );
+                          })()
+                        : null}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </ShipmentDetailCard>
+
+          {/* ── إثبات التسليم ───────────────────────────────────────────── */}
           <ShipmentDetailCard>
             <ShipmentDetailCardHeader
               title="إثبات التسليم"
@@ -2947,13 +3630,14 @@ export function LogisticsShipmentDetailPage() {
             )}
           </ShipmentDetailCard>
 
+          {/* ── أصناف الشحنة ───────────────────────────────────────────── */}
           <ShipmentDetailCard>
             <ShipmentDetailCardHeader
               title="أصناف الشحنة"
               subtitle={`${itemCount} صنف / ${totalRequestedQty.toLocaleString("ar-EG")} مطلوب / ${totalDoneQty.toLocaleString("ar-EG")} تم التنفيذ`}
             />
 
-            {shipmentItems.length === 0 ? (
+            {items.length === 0 ? (
               <div className="flex min-h-[320px] items-center px-5 py-16">
                 <EmptyState title="لا توجد أصناف" description="لم يتم مزامنة أي أصناف لهذه الشحنة حتى الآن." />
               </div>
@@ -2968,10 +3652,13 @@ export function LogisticsShipmentDetailPage() {
                         <th className="px-4 py-4 text-center">المطلوب</th>
                         <th className="px-4 py-4 text-center">محجوز</th>
                         <th className="px-4 py-4 text-center">تم التنفيذ</th>
+                        <th className="px-4 py-4 text-center">سعر الوحدة</th>
+                        <th className="px-4 py-4 text-center">الخصم</th>
+                        <th className="px-4 py-4 text-center">قيمة السطر</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                      {shipmentItems.map((item, index) => (
+                      {items.map((item: ShipmentDetailItem, index: number) => (
                         <tr key={item.id} className="transition hover:bg-brand-25/70 dark:hover:bg-white/[0.02]">
                           <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{index + 1}</td>
                           <td className="px-4 py-4">
@@ -2981,6 +3668,11 @@ export function LogisticsShipmentDetailPage() {
                             {item.product_ref ? (
                               <p className="mt-1 text-xs text-gray-400 dark:text-gray-500" dir="auto">
                                 {item.product_ref}
+                              </p>
+                            ) : null}
+                            {item.move_state === "cancel" ? (
+                              <p className="mt-1 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                                سطر ملغي
                               </p>
                             ) : null}
                           </td>
@@ -2993,43 +3685,75 @@ export function LogisticsShipmentDetailPage() {
                           <td className="px-4 py-4 text-center text-gray-500 dark:text-gray-400">
                             {Number(item.done_quantity ?? 0).toLocaleString("ar-EG")}
                           </td>
+                          <td
+                            className={`px-4 py-4 text-center ${item.priced ? "text-gray-700 dark:text-gray-300" : "text-amber-600 dark:text-amber-400"}`}
+                            dir="ltr"
+                          >
+                            {item.priced ? money(item.unit_price) : "بدون سعر"}
+                          </td>
+                          <td className="px-4 py-4 text-center text-gray-500 dark:text-gray-400" dir="ltr">
+                            {item.discount_percent != null && Number(item.discount_percent) > 0
+                              ? `${formatNumber(Number(item.discount_percent), 1)}%`
+                              : "--"}
+                          </td>
+                          <td
+                            className={`px-4 py-4 text-center font-medium ${item.priced ? "text-gray-900 dark:text-white" : "text-amber-600 dark:text-amber-400"}`}
+                            dir="ltr"
+                          >
+                            {item.priced ? money(item.delivered_value) : "--"}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
+                    <tfoot className="border-t border-gray-200 bg-gray-50/70 text-sm font-semibold dark:border-gray-800 dark:bg-white/[0.03]">
+                      <tr>
+                        <td className="px-4 py-4" colSpan={7}>
+                          <span className="text-gray-500 dark:text-gray-400">إجمالي قيمة الأصناف المسلّمة</span>
+                        </td>
+                        <td className="px-4 py-4 text-center text-gray-900 dark:text-white" dir="ltr">
+                          {deliveredValueLabel}
+                        </td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               </div>
             )}
           </ShipmentDetailCard>
 
+          {/* ── المرتجعات ──────────────────────────────────────────────── */}
           <ShipmentDetailCard>
             <ShipmentDetailCardHeader
               title="المرتجعات"
-              subtitle="الأصناف المرتجعة من هذه الشحنة"
+              subtitle="ما رُجِع من هذه الشحنة. الكمية المعروضة هي الكمية الفعلية، بعد استبعاد ما تجاوز العجز الحقيقي."
             />
 
-            {returnItems.length === 0 ? (
+            {returns.length === 0 ? (
               <div className="flex min-h-[200px] items-center px-5 py-12">
                 <EmptyState title="لا توجد مرتجعات من هذه الشحنة" description="لم يتم تسجيل أي مرتجعات مرتبطه بهذه الشحنة." />
               </div>
             ) : (
               <div className="px-5 py-5">
-                {totalReturnedQty > 0 || totalReceivedQty > 0 ? (
-                  <div className="mb-4 flex flex-wrap gap-4 rounded-2xl bg-brand-25 p-4 dark:bg-white/[0.04]">
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">إجمالي المرتجع</p>
-                      <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
-                        {totalReturnedQty.toLocaleString("ar-EG")} وحدة
-                      </p>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">إجمالي المستلم</p>
-                      <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
-                        {totalReceivedQty.toLocaleString("ar-EG")} وحدة
-                      </p>
-                    </div>
+                <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400">إجمالي المرتجع (الفعلي)</p>
+                    <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
+                      {totalReturnedQty.toLocaleString("ar-EG")} وحدة
+                    </p>
                   </div>
-                ) : null}
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400">إجمالي المستلم</p>
+                    <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
+                      {totalReceivedQty.toLocaleString("ar-EG")} وحدة
+                    </p>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400">قيمة المرتجعات المحتسبة</p>
+                    <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white" dir="ltr">
+                      {money(returnsValue)}
+                    </p>
+                  </div>
+                </div>
 
                 <div className="overflow-x-auto rounded-2xl border border-gray-200 dark:border-gray-800">
                   <table className="min-w-full text-right text-sm" dir="rtl">
@@ -3038,15 +3762,37 @@ export function LogisticsShipmentDetailPage() {
                         <th className="w-12 px-4 py-4 text-right">#</th>
                         <th className="min-w-[220px] px-4 py-4 text-right">الصنف</th>
                         <th className="px-4 py-4 text-center">المطلوب</th>
-                        <th className="px-4 py-4 text-center">تم التسليم</th>
-                        <th className="px-4 py-4 text-center">المرتجع</th>
-                        <th className="px-4 py-4 text-center">المستلم</th>
+                        <th className="px-4 py-4 text-center">تم التسليم (قبل المرتجع)</th>
+                        <th className="px-4 py-4 text-center">المرتجع (المحاسَب)</th>
+                        <th className="px-4 py-4 text-center">المستلم بالمخزن</th>
+                        <th className="px-4 py-4 text-center">سعر الوحدة</th>
+                        <th className="px-4 py-4 text-center">قيمة المرتجع</th>
                         <th className="px-4 py-4 text-right">سبب الإرجاع</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                      {returnItems.map((item, index) => (
-                        <tr key={item.id} className="transition hover:bg-brand-25/70 dark:hover:bg-white/[0.02]">
+                      {returns.map((item: ShipmentDetailReturn, index: number) => {
+                        const effectiveQty = Number(item.effective_returned_qty ?? 0);
+                        // How much of this line actually reached the customer BEFORE it came
+                        // back. Deriving it as requested - returned shows 0 for a full return,
+                        // which reads as "never delivered" when the goods did go out and came
+                        // back. delivered_quantity is the recorded truth; the derived net is
+                        // only a fallback for older rows that lack it.
+                        const netDelivered = Math.max(
+                          0,
+                          Number(item.requested_quantity ?? 0) - effectiveQty,
+                        );
+                        const deliveredQty =
+                          item.delivered_quantity != null
+                            ? Number(item.delivered_quantity)
+                            : netDelivered;
+                        const receivedQty = Number(item.received_quantity ?? 0);
+                        const awaitingReceipt = receivedQty < effectiveQty;
+                        return (
+                        <tr
+                          key={item.id}
+                          className="transition hover:bg-brand-25/70 dark:hover:bg-white/[0.02]"
+                        >
                           <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{index + 1}</td>
                           <td className="px-4 py-4">
                             <p className="font-semibold text-gray-900 dark:text-white" dir="auto">
@@ -3057,30 +3803,139 @@ export function LogisticsShipmentDetailPage() {
                                 {item.product_ref}
                               </p>
                             ) : null}
+                            {item.return_shipment_status ? (
+                              <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                                شحنة المرتجع:{" "}
+                                <span dir="ltr">{item.return_shipment_reference ?? "بلا مرجع"}</span> ·{" "}
+                                {shipmentStatusLabel(item.return_shipment_status)}
+                              </p>
+                            ) : null}
                           </td>
                           <td className="px-4 py-4 text-center font-medium text-gray-800 dark:text-gray-200">
                             {Number(item.requested_quantity ?? 0).toLocaleString("ar-EG")}
                           </td>
                           <td className="px-4 py-4 text-center text-gray-500 dark:text-gray-400">
-                            {Number(item.delivered_quantity ?? 0).toLocaleString("ar-EG")}
+                            {deliveredQty.toLocaleString("ar-EG")}
                           </td>
-                          <td className="px-4 py-4 text-center font-medium text-gray-800 dark:text-gray-200">
-                            {Number(item.returned_quantity ?? 0).toLocaleString("ar-EG")}
+                          <td className="px-4 py-4 text-center">
+                            <span className="font-medium text-gray-800 dark:text-gray-200">
+                              {effectiveQty.toLocaleString("ar-EG")}
+                            </span>
                           </td>
-                          <td className="px-4 py-4 text-center text-gray-500 dark:text-gray-400">
-                            {Number(item.received_quantity ?? 0).toLocaleString("ar-EG")}
+                          <td
+                            className={`px-4 py-4 text-center ${awaitingReceipt ? "font-medium text-amber-600 dark:text-amber-400" : "text-gray-500 dark:text-gray-400"}`}
+                          >
+                            {receivedQty.toLocaleString("ar-EG")}
+                            {awaitingReceipt ? (
+                              <span className="mt-0.5 block text-[10px] font-normal">
+                                لم يُستلم بعد
+                              </span>
+                            ) : null}
+                          </td>
+                          <td
+                            className={`px-4 py-4 text-center ${item.priced ? "text-gray-700 dark:text-gray-300" : "text-amber-600 dark:text-amber-400"}`}
+                            dir="ltr"
+                          >
+                            {item.priced ? money(item.unit_price) : "بدون سعر"}
+                          </td>
+                          <td
+                            className={`px-4 py-4 text-center font-medium ${item.priced ? "text-gray-900 dark:text-white" : "text-amber-600 dark:text-amber-400"}`}
+                            dir="ltr"
+                          >
+                            {item.priced ? money(item.return_value) : "--"}
                           </td>
                           <td className="px-4 py-4 text-right text-gray-500 dark:text-gray-400" dir="auto">
-                            {item.return_reason || "--"}
+                            {returnReasonLabel(item.return_reason)}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               </div>
             )}
           </ShipmentDetailCard>
+
+          {/* ── القيود المحاسبية ───────────────────────────────────────── */}
+          {journal.length > 0 ? (
+            <ShipmentDetailCard>
+              <ShipmentDetailCardHeader
+                title="القيود المحاسبية"
+                subtitle="قيود مُرحّلة مرتبطة بهذا الطلب أو этой الشحنة"
+              />
+              <div className="px-5 py-5">
+                <div className="overflow-x-auto rounded-2xl border border-gray-200 dark:border-gray-800">
+                  <table className="min-w-full text-right text-sm" dir="rtl">
+                    <thead className="bg-brand-25/80 dark:bg-white/[0.02]">
+                      <tr className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500">
+                        <th className="px-4 py-4 text-right">رقم القيد</th>
+                        <th className="px-4 py-4 text-right">النوع</th>
+                        <th className="px-4 py-4 text-right">التاريخ</th>
+                        <th className="px-4 py-4 text-right">الحالة</th>
+                        <th className="px-4 py-4 text-center">المبلغ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                      {journal.map((entry) => (
+                        <tr key={entry.id} className="transition hover:bg-brand-25/70 dark:hover:bg-white/[0.02]">
+                          <td className="px-4 py-4 font-medium text-gray-900 dark:text-white" dir="ltr">
+                            {entry.entry_number || "--"}
+                          </td>
+                          <td className="px-4 py-4 text-gray-500 dark:text-gray-400">
+                            {journalSourceLabel(entry.source_type)}
+                          </td>
+                          <td className="px-4 py-4 text-gray-500 dark:text-gray-400">
+                            {formatDate(entry.entry_date)}
+                          </td>
+                          <td className="px-4 py-4 text-gray-500 dark:text-gray-400">
+                            {journalStatusLabel(entry.status)}
+                          </td>
+                          <td className="px-4 py-4 text-center font-medium text-gray-900 dark:text-white" dir="ltr">
+                            {money(entry.posted_total)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                  القيد المُرحّل يمثل قيمة التسليم المفوتر، وقد يختلف عن سعر الأوردر الكامل عند التسليم الجزئي.
+                </p>
+
+                {creditSurplus > 0.01 ? (
+                  <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+                    <p className="font-semibold">قيد الدائن المُرحّل أكبر من قيمة المرتجع الفعلي.</p>
+                    <dl className="mt-2 space-y-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <dt>إجمالي قيود الدائن المُرحّلة</dt>
+                        <dd className="font-semibold" dir="ltr">
+                          {money(postedReversalTotal)}
+                        </dd>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <dt>الصحيح حسب قيمة المرتجع المسجّل</dt>
+                        <dd className="font-semibold" dir="ltr">
+                          {money(expectedCredit)}
+                        </dd>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-rose-200 pt-1 dark:border-rose-500/30">
+                        <dt>الفرق الزائد</dt>
+                        <dd className="font-semibold" dir="ltr">
+                          {money(creditSurplus)}
+                        </dd>
+                      </div>
+                    </dl>
+                    <p className="mt-2">
+                      قيد الدائن يعتمد على قيمة المرتجع وقت إنشاء شحنة المرتجع، وهي لا تطابق
+                      قيمة المرتجع الفعلية المسجّلة على هذه الشحنة. هذا تنبيه عرض فقط — لم يتم
+                      تعديل أي قيد.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            </ShipmentDetailCard>
+          ) : null}
         </div>
       </AdminPageFrame>
     </>

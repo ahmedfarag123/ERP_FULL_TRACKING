@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -14,12 +14,8 @@ import {
 } from "recharts";
 import PageMeta from "../../components/common/PageMeta";
 import DateRangePicker from "../../components/form/date-range-picker";
-import {
-  fetchCustomerServiceAnalytics,
-  fetchCustomerServiceProductAnalytics,
-} from "../../lib/customer-service";
+import { fetchCustomerServiceAnalytics } from "../../lib/customer-service";
 import type { CustomerServiceProductStat } from "../../lib/customer-service";
-import { supabase } from "../../lib/supabase";
 import type { DateRangeValue } from "../../lib/date-range";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -43,7 +39,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   collection_issue: "مشكلة تحصيل",
   vehicle_full: "سيارة ممتلئة",
   pricing_error: "خطأ تسعير",
-  product_expiry_date: "منتهي الصلاحية",
   wrong_branch_invoice: "فاتورة فرع غلط",
   product_mismatch: "عدم مطابقة منتج",
   customer_complaint: "شكوى عميل",
@@ -58,7 +53,8 @@ const CATEGORY_LABELS: Record<string, string> = {
   customer_hesitation: "تردد العميل",
   payment_issue: "مشكلة دفع",
   debt_issue: "مديونية",
-  other: "أخرى",
+  minimum_order: "فاتورة أقل من الحد الأدنى للطلب",
+  other: "غير مصنف",
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -82,7 +78,6 @@ const CATEGORY_COLORS: Record<string, string> = {
   collection_issue: "#0d9488",
   vehicle_full: "#65a30d",
   pricing_error: "#ca8a04",
-  product_expiry_date: "#eab308",
   wrong_branch_invoice: "#e11d48",
   product_mismatch: "#a855f7",
   customer_complaint: "#db2777",
@@ -97,6 +92,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   customer_hesitation: "#c084fc",
   payment_issue: "#f43f5e",
   debt_issue: "#e11d48",
+  minimum_order: "#475569",
   other: "#9ca3af",
 };
 
@@ -414,35 +410,22 @@ export default function CustomerServiceAnalytics() {
     staleTime: 60_000,
   });
 
-  const { data: ticketDetails } = useQuery({
-    queryKey: ["cs-analytics-tickets", startISO, endISO],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("order_tickets")
-        .select("id, subject, status, category, created_at, resolved_at, closed_at, assigned_to_full_name, assigned_departments, order:orders(delivery_status), raw_payload")
-        .gte("created_at", startISO)
-        .lte("created_at", endISO);
-      return (data ?? []) as unknown as Array<TicketRow & {
-        resolved_at: string | null;
-        closed_at: string | null;
-        assigned_departments: string[] | null;
-        order: { delivery_status: string | null } | null;
-        raw_payload: Record<string, unknown> | null;
-      }>;
-    },
-    staleTime: 60_000,
-  });
+  const ticketDetails = (analytics?.tickets ?? []) as unknown as Array<TicketRow & {
+    resolved_at: string | null;
+    closed_at: string | null;
+    assigned_departments: string[] | null;
+    created_by_full_name: string | null;
+    order_id: string | null;
+    delivery_key: string;
+    product_keys: string[];
+  }>;
 
   const isDetailResolved = (t: { status: string; resolved_at?: string | null; closed_at?: string | null }) =>
     t.status === "resolved" || t.status === "closed" || Boolean(t.resolved_at || t.closed_at);
   const sortByCreatedDesc = (a: TicketRow, b: TicketRow) =>
     new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
 
-  const { data: productStats } = useQuery({
-    queryKey: ["cs-analytics-products", startISO, endISO],
-    queryFn: () => fetchCustomerServiceProductAnalytics(startISO, endISO),
-    staleTime: 60_000,
-  });
+  const productStats = analytics?.products ?? [];
 
   const [detailTitle, setDetailTitle] = useState("");
   const [detailTickets, setDetailTickets] = useState<TicketRow[]>([]);
@@ -471,15 +454,8 @@ export default function CustomerServiceAnalytics() {
     }
   }
 
-  function getTicketDeliveryKey(t: TicketRow & { order: { delivery_status: string | null } | null; raw_payload: Record<string, unknown> | null }): string {
-    const xl = t.raw_payload?.delivery_status_xl;
-    if (xl === "بالكامل") return "full";
-    if (xl === "مرتجع جزئى") return "partial";
-    if (["مرتجع كلى بعد الوصول","مرتجع كلى قبل الوصول","مرتجع كلي","مرتجع كلى","الغاء","مرتجع"].includes(String(xl ?? ""))) return "cancelled";
-    if (xl) return "other_delivery";
-    const orderStatus = Array.isArray(t.order) ? t.order[0]?.delivery_status : t.order?.delivery_status;
-    if (orderStatus && orderStatus !== "false") return orderStatus;
-    return "unknown";
+  function getTicketDeliveryKey(t: { delivery_key?: string }): string {
+    return t.delivery_key || "unknown";
   }
 
   const handleSliceClick = useCallback(
@@ -554,10 +530,17 @@ export default function CustomerServiceAnalytics() {
     key,
   }));
 
-  const productChartData = (productStats ?? []).slice(0, 10).map((p) => ({
-    name: (p.product_name || "").replace(/^\[[^\]]*\]\s*/, "").slice(0, 30),
+  const CHART_PRODUCT_LIMIT = 15;
+  const productChartData = (productStats ?? []).slice(0, CHART_PRODUCT_LIMIT).map((p) => ({
+    name: (p.product_name || "").replace(/^\[[^\]]*\]\s*/, ""),
     tickets: p.ticket_count,
   }));
+
+  const productDetailTickets = useMemo(() => {
+    if (!productDetail) return [];
+    const wanted = new Set(productDetail.ticket_ids ?? []);
+    return ticketDetails.filter((t) => wanted.has(t.id));
+  }, [productDetail, ticketDetails]);
 
   const rangeLabel = quickRange === "7d" ? "آخر أسبوع" : quickRange === "30d" ? "آخر 30 يوم" : "الفترة المحددة";
 
@@ -677,6 +660,11 @@ export default function CustomerServiceAnalytics() {
               <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200/60 dark:bg-white/[0.04] dark:ring-white/[0.06]">
                 <h3 className="mb-4 text-sm font-bold text-gray-900 dark:text-white" dir="rtl">
                   المنتجات الأكثر شكاوى (مرتبطة بتذاكر)
+                  <span className="ms-2 text-xs font-normal text-gray-500">
+                    {productStats.length > CHART_PRODUCT_LIMIT
+                      ? `أعلى ${CHART_PRODUCT_LIMIT} من ${productStats.length} منتج — القائمة بالأسفل كاملة`
+                      : `${productStats.length} منتج`}
+                  </span>
                 </h3>
                 {(!productStats || productStats.length === 0) ? (
                   <div className="flex h-[200px] items-center justify-center text-sm text-gray-400">
@@ -744,11 +732,11 @@ export default function CustomerServiceAnalytics() {
 
             {/* Product Ticket Detail Panel */}
             <AnimatePresence>
-              {productDetail && productDetail.tickets.length > 0 && (
+              {productDetail && productDetailTickets.length > 0 && (
                 <div className="px-8 pb-6">
                   <InlineDetailPanel
-                    title={`${productDetail.product_name} — ${productDetail.tickets.length} تذكرة`}
-                    tickets={productDetail.tickets as unknown as TicketRow[]}
+                    title={`${productDetail.product_name} — ${productDetailTickets.length} تذكرة`}
+                    tickets={productDetailTickets as unknown as TicketRow[]}
                     onClose={() => setProductDetail(null)}
                   />
                 </div>

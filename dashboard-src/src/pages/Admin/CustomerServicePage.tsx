@@ -12,6 +12,7 @@ import {
   ExclamationTriangleIcon,
   FunnelIcon,
   MagnifyingGlassIcon,
+  PencilSquareIcon,
   PlusIcon,
   TicketIcon,
   TrashIcon,
@@ -21,6 +22,7 @@ import { AdminPageFrame } from "../../components/admin/AdminPageElements";
 import StatusBadge from "../../components/ui/StatusBadge";
 import EmptyState from "../../components/ui/EmptyState";
 import CreateTicketModal from "../../components/customer-service/CreateTicketModal";
+import EditTicketModal from "../../components/customer-service/EditTicketModal";
 import ConnectionStatusBar from "../../components/common/ConnectionStatusBar";
 import { useAuth } from "../../context/AuthContext";
 import { useConnectionStatus } from "../../hooks/useConnectionStatus";
@@ -102,6 +104,7 @@ export default function CustomerServicePage() {
   });
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [editingTicket, setEditingTicket] = useState<TicketWithDetails | null>(null);
 
   const loadTickets = useCallback(async () => {
     try {
@@ -236,6 +239,12 @@ export default function CustomerServicePage() {
 
   const handleCreated = useCallback(() => {
     setIsCreateModalOpen(false);
+    void loadTickets();
+    void loadStats();
+  }, [loadTickets, loadStats]);
+
+  const handleTicketUpdated = useCallback(() => {
+    setEditingTicket(null);
     void loadTickets();
     void loadStats();
   }, [loadTickets, loadStats]);
@@ -640,6 +649,17 @@ export default function CustomerServicePage() {
                           </td>
                           <td className="px-4 py-4 text-center align-middle">
                             <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setEditingTicket(ticket);
+                                }}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-transparent text-gray-500 transition hover:border-gray-200 hover:bg-brand-25 hover:text-blue-600 dark:hover:border-gray-700 dark:hover:bg-white/[0.02] dark:hover:text-blue-300"
+                                aria-label="تعديل التذكرة"
+                              >
+                                <PencilSquareIcon className="h-4 w-4" aria-hidden />
+                              </button>
                               {canDeleteTickets ? (
                                 <button
                                   type="button"
@@ -741,6 +761,16 @@ export default function CustomerServicePage() {
           onClose={() => setIsCreateModalOpen(false)}
           onCreated={handleCreated}
           currentUserId={profile.id}
+        />
+      ) : null}
+
+      {editingTicket ? (
+        <EditTicketModal
+          isOpen
+          onClose={() => setEditingTicket(null)}
+          onUpdated={handleTicketUpdated}
+          ticket={editingTicket}
+          currentUserId={profile?.id ?? ""}
         />
       ) : null}
     </>

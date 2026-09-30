@@ -161,7 +161,7 @@ async function fetchCollections(shipments: Pick<DriverShipment, 'id'>[]) {
 }
 
 async function fetchOrdersForShipments(
-  shipments: Pick<DriverShipment, 'id' | 'linked_order_id' | 'odoo_order_name' | 'external_order_id'>[]
+  shipments: Pick<DriverShipment, 'id' | 'linked_order_id' | 'odoo_order_name' | 'external_order_id' | 'delivered_invoice_amount'>[]
 ): Promise<Map<string, import('@/types').ShipmentOrder[]>> {
   if (shipments.length === 0) {
     return new Map();
@@ -185,29 +185,104 @@ async function fetchOrdersForShipments(
     return new Map(shipments.map((s) => [s.id, []]));
   }
 
+  const shipmentIds = shipments.map((s) => s.id);
+  const [itemsRes, lineItemsRes] = await Promise.all([
+    supabase
+      .from('logistics_shipment_items')
+      .select('shipment_id, external_product_id, product_name, done_quantity')
+      .in('shipment_id', shipmentIds),
+    supabase
+      .from('order_line_items')
+      .select('order_id, external_product_id, product_name, unit_price, ordered_quantity, total_amount')
+      .in('order_id', linkedOrderIds),
+  ]);
+
+  const deliveredAmounts = new Map<string, number>();
+  const itemsByShipment = new Map<string, Array<{ external_product_id: string | null; product_name: string; done_quantity: number | null }>>();
+  const linesByOrder = new Map<string, Array<{ external_product_id: string; product_name: string; unit_price: number | null; ordered_quantity: number | null; total_amount: number | null }>>();
+
+  for (const item of (itemsRes.data ?? []) as Array<{ shipment_id: string; external_product_id: string | null; product_name: string; done_quantity: number | null }>) {
+    const arr = itemsByShipment.get(item.shipment_id) ?? [];
+    arr.push(item);
+    itemsByShipment.set(item.shipment_id, arr);
+  }
+
+  for (const line of (lineItemsRes.data ?? []) as Array<{ order_id: string; external_product_id: string; product_name: string; unit_price: number | null; ordered_quantity: number | null; total_amount: number | null }>) {
+    const arr = linesByOrder.get(line.order_id) ?? [];
+    arr.push(line);
+    linesByOrder.set(line.order_id, arr);
+  }
+
+  for (const shipment of shipments) {
+    if (!shipment.linked_order_id) continue;
+    const items = itemsByShipment.get(shipment.id) ?? [];
+    const hasDone = items.some((i) => (i.done_quantity ?? 0) > 0);
+    if (!hasDone) continue;
+
+    // delivered_invoice_amount is the authoritative server-side NET billable
+    // value (done quantities minus recorded returns), kept fresh by migration
+    // 00200. Prefer it over the client-side gross done x price sum so the
+    // collection sheet always asks for exactly what the database will record.
+    const serverNet = toNullableNumber(shipment.delivered_invoice_amount);
+    if (serverNet !== null && !deliveredAmounts.has(shipment.linked_order_id)) {
+      deliveredAmounts.set(shipment.linked_order_id, serverNet);
+    }
+
+    const lines = linesByOrder.get(shipment.linked_order_id) ?? [];
+    let deliveredTotal = 0;
+
+    for (const item of items) {
+      const doneQty = item.done_quantity ?? 0;
+      if (doneQty <= 0) continue;
+
+      let matchingLine = null;
+      if (item.external_product_id) {
+        matchingLine = lines.find((l) => l.external_product_id === item.external_product_id);
+      }
+      if (!matchingLine) {
+        const itemName = (item.product_name ?? '').toLowerCase().trim();
+        matchingLine = lines.find((l) => (l.product_name ?? '').toLowerCase().trim() === itemName);
+      }
+
+      if (matchingLine) {
+        const unitPrice = matchingLine.unit_price
+          ?? ((matchingLine.ordered_quantity ?? 0) > 0 ? (matchingLine.total_amount ?? 0) / (matchingLine.ordered_quantity ?? 1) : 0);
+        deliveredTotal += doneQty * unitPrice;
+      }
+    }
+
+    if (deliveredTotal > 0 && !deliveredAmounts.has(shipment.linked_order_id)) {
+      deliveredAmounts.set(shipment.linked_order_id, deliveredTotal);
+    }
+  }
+
   const orderMap = new Map(
-    (data ?? []).map((order) => [
-      String(order.id),
-      {
-        orderId: String(order.id),
-        orderNumber: order.odoo_order_name ?? order.external_order_id ?? null,
-        orderTotal: toNullableNumber(order.total_amount) ?? 0,
-        paymentTerm: order.raw_payload?.payment_term_id
-          ? String(order.raw_payload.payment_term_id)
-          : null,
-      } satisfies import('@/types').ShipmentOrder,
-    ])
+    (data ?? []).map((order) => {
+      const delivered = deliveredAmounts.get(String(order.id));
+      return [
+        String(order.id),
+        {
+          orderId: String(order.id),
+          orderNumber: order.odoo_order_name ?? order.external_order_id ?? null,
+          orderTotal: toNullableNumber(order.total_amount) ?? 0,
+          deliveredInvoiceAmount: delivered ?? null,
+          paymentTerm: order.raw_payload?.payment_term_id
+            ? String(order.raw_payload.payment_term_id)
+            : null,
+        } satisfies import('@/types').ShipmentOrder,
+      ];
+    })
   );
 
   return new Map(
     shipments.map((shipment) => {
       if (!shipment.linked_order_id) {
-        // Fallback: use shipment-level order info
         const fallbackOrder: import('@/types').ShipmentOrder | null = shipment.odoo_order_name || shipment.external_order_id
           ? {
               orderId: shipment.linked_order_id ?? shipment.id,
               orderNumber: shipment.odoo_order_name ?? shipment.external_order_id ?? null,
               orderTotal: 0,
+              deliveredInvoiceAmount: null,
               paymentTerm: null,
             }
           : null;
@@ -220,8 +295,9 @@ async function fetchOrdersForShipments(
   );
 }
 
+
 const shipmentSelect =
-  'id, plan_id, external_shipment_id, shipment_reference, origin_ref, external_order_id, odoo_order_name, linked_order_id, customer_id, external_customer_id, customer_name, customer_phone, customer_latitude, customer_longitude, warehouse_id, external_warehouse_id, warehouse_name, warehouse_latitude, warehouse_longitude, estimated_road_distance_km, logistics_user_id, assigned_profile_id, external_user_id, assigned_user_name, assigned_job_title, operation_type_name, operation_type_ref, source_location_ref, destination_location_ref, shipment_state, shipment_status, delivery_phase, route_sequence, route_locked, priority, move_type, scheduled_at, completed_at, odoo_created_at, odoo_updated_at, total_weight, notes, last_sync_at';
+  'id, plan_id, external_shipment_id, shipment_reference, origin_ref, external_order_id, odoo_order_name, linked_order_id, customer_id, external_customer_id, customer_name, customer_phone, customer_latitude, customer_longitude, warehouse_id, external_warehouse_id, warehouse_name, warehouse_latitude, warehouse_longitude, estimated_road_distance_km, logistics_user_id, assigned_profile_id, external_user_id, assigned_user_name, assigned_job_title, operation_type_name, operation_type_ref, source_location_ref, destination_location_ref, shipment_state, shipment_status, delivery_phase, route_sequence, route_locked, priority, move_type, scheduled_at, completed_at, odoo_created_at, odoo_updated_at, total_weight, notes, last_sync_at, delivered_invoice_amount';
 
 export type AssignedShipmentsResult = {
   activePlanId: string | null;
@@ -671,7 +747,10 @@ function attachPreparationStatus(
     return {
       ...item,
       preparation_status: prep.preparation_status,
-      approved_quantity: prep.approved_quantity,
+      // NOTE: prep.approved_quantity is a PLAN-level aggregate (it covers every
+      // order in the plan) and must never overwrite this shipment item's own
+      // approved_quantity, nor be used in any return calculation. We keep the
+      // item's value untouched and only surface the plan prep status/reason.
       shortage_reason: prep.shortage_reason,
     };
   });
@@ -772,6 +851,37 @@ export async function updateShipmentPhase(input: {
     p_proof_photo_path: input.proofPhotoPath ?? null,
     p_payload: input.payload ?? {},
     p_idempotency_key: idempotencyKey,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+
+export async function reportDeliveryFailure(input: {
+  shipmentId: string;
+  failureReason: string;
+  note?: string;
+  returnType: 'full' | 'partial';
+  returnItems?: Array<{ itemId: string; productName: string; returnedQuantity: number }>;
+  proofPhotoPath?: string | null;
+  location?: DriverLocation | null;
+}) {
+  const location = input.location ?? await getCurrentDriverLocation();
+  const { data, error } = await supabase.rpc('driver_report_delivery_failure', {
+    p_shipment_id: input.shipmentId,
+    p_failure_reason: input.failureReason,
+    p_note: input.note ?? null,
+    p_return_type: input.returnType,
+    p_return_items: input.returnItems
+      ? input.returnItems.map((i) => ({ item_id: i.itemId, product_name: i.productName, returned_quantity: i.returnedQuantity }))
+      : null,
+    p_proof_photo_path: input.proofPhotoPath ?? null,
+    p_location_lat: location?.lat ?? null,
+    p_location_lng: location?.lng ?? null,
   });
 
   if (error) {
@@ -885,39 +995,46 @@ export async function fetchOrderCollectionsForPlan(
 
   const shipmentIds = shipments.map((s) => String(s.id));
 
-  const { data: collections, error: collectionsError } = await supabase
-    .from('logistics_order_collections')
-    .select('shipment_id, order_total, payment_method, driver_debt_amount, collection_status')
+  const { data: legs, error: legsError } = await supabase
+    .from('logistics_order_collection_payment_legs' as any)
+    .select('shipment_id, payment_method, amount')
     .in('shipment_id', shipmentIds);
-
-  if (collectionsError || !collections || collections.length === 0) {
-    return { cashDebt: 0, transferAmount: 0, chequeAmount: 0, creditAmount: 0, currencyCode: 'EGP' };
-  }
-
-  const collectedStatuses = new Set(['collected_successfully', 'collected_from_customer', 'collected']);
 
   let cashDebt = 0;
   let transferAmount = 0;
   let chequeAmount = 0;
   let creditAmount = 0;
-  for (const row of collections) {
-    const total = toNullableNumber(row.order_total) ?? 0;
-    const method = String(row.payment_method ?? '').toLowerCase();
-    const debt = toNullableNumber(row.driver_debt_amount) ?? 0;
-    const status = String(row.collection_status ?? '').toLowerCase();
-    const isReturn = returnShipmentIds.has(String(row.shipment_id ?? ''));
-    const sign = isReturn ? -1 : 1;
 
-    if (collectedStatuses.has(status)) continue;
+  if (!legsError && legs && legs.length > 0) {
+    for (const row of legs as any[]) {
+      const amt = toNullableNumber(row.amount) ?? 0;
+      const method = String(row.payment_method ?? '').toLowerCase();
+      const isReturn = returnShipmentIds.has(String(row.shipment_id ?? ''));
+      const sign = isReturn ? -1 : 1;
+      if (method === 'cash') cashDebt += sign * amt;
+      else if (method === 'bank_transfer' || method === 'transfer') transferAmount += sign * amt;
+      else if (method === 'cheque') chequeAmount += sign * amt;
+      else if (method === 'credit' || method === 'installments') creditAmount += sign * amt;
+    }
+  } else {
+    const { data: collections } = await supabase
+      .from('logistics_order_collections')
+      .select('shipment_id, order_total, payment_method, driver_debt_amount, collection_status')
+      .in('shipment_id', shipmentIds);
 
-    if (method === 'cash') {
-      cashDebt += sign * (debt > 0 ? debt : total);
-    } else if (method === 'bank_transfer' || method === 'transfer') {
-      transferAmount += sign * total;
-    } else if (method === 'cheque') {
-      chequeAmount += sign * total;
-    } else if (method === 'credit' || method === 'installments') {
-      creditAmount += sign * total;
+    const collectedStatuses = new Set(['collected_successfully', 'collected_from_customer', 'collected']);
+    for (const row of (collections ?? []) as any[]) {
+      const total = toNullableNumber(row.order_total) ?? 0;
+      const method = String(row.payment_method ?? '').toLowerCase();
+      const debt = toNullableNumber(row.driver_debt_amount) ?? 0;
+      const status = String(row.collection_status ?? '').toLowerCase();
+      const isReturn = returnShipmentIds.has(String(row.shipment_id ?? ''));
+      const sign = isReturn ? -1 : 1;
+      if (collectedStatuses.has(status)) continue;
+      if (method === 'cash') cashDebt += sign * (debt > 0 ? debt : total);
+      else if (method === 'bank_transfer' || method === 'transfer') transferAmount += sign * total;
+      else if (method === 'cheque') chequeAmount += sign * total;
+      else if (method === 'credit' || method === 'installments') creditAmount += sign * total;
     }
   }
 

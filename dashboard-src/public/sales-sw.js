@@ -1,4 +1,4 @@
-const SALES_CACHE = "sales-workspace-v9";
+const SALES_CACHE = "sales-workspace-v11";
 const IS_LOCAL_DEV_HOST =
   self.location.hostname === "localhost" ||
   self.location.hostname === "127.0.0.1" ||

@@ -42,6 +42,7 @@ export interface LogisticsShipmentRecord {
   total_weight: number | string | null;
   notes: string | null;
   last_sync_at: string | null;
+  delivered_invoice_amount?: number | string | null;
 }
 
 export interface LogisticsShipmentItemRecord {

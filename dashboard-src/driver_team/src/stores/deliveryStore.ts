@@ -5,6 +5,7 @@ import type { DriverShipment, DriverShipmentDetail, DriverShipmentPhase } from '
 import {
   fetchAssignedShipmentDetails,
   updateShipmentPhase,
+  reportDeliveryFailure,
   driverReorderPlanShipments,
   driverStartDeliveryRoute,
   driverFinishDeliveryRoute,
@@ -48,7 +49,7 @@ interface DeliveryState {
   updateShipmentStatus: (id: string, status: ShipmentStatus, note?: string) => Promise<void>;
   addShipmentNote: (id: string, note: string) => Promise<void>;
   setProofOfDelivery: (id: string, photoUrl: string, notes?: string, payload?: Record<string, unknown>) => Promise<void>;
-  reportFailure: (id: string, reason: string, note: string, photoUrl?: string) => Promise<void>;
+  reportFailure: (id: string, reason: string, note: string, photoUrl?: string, returnType?: 'full' | 'partial', returnItems?: Array<{ itemId: string; productName: string; returnedQuantity: number }>) => Promise<void>;
   startShift: () => Promise<void>;
   markAllPickedUp: () => Promise<void>;
   markShipmentPickedUp: (id: string) => Promise<void>;
@@ -835,7 +836,7 @@ loadShipments: async () => {
         );
       },
 
-      reportFailure: async (id, reason, note, photoUrl) => {
+      reportFailure: async (id, reason, note, photoUrl, returnType = 'full', returnItems) => {
         const shipmentIds = shipmentIdsInSameStop(get().shipments, id);
 
         set((state) => ({
@@ -858,18 +859,16 @@ loadShipments: async () => {
 
         await trackShipmentMutation(
           () =>
-            persistOrQueueShipmentUpdates(
-              shipmentIds.map((shipmentId) => ({
-                actionType: 'failure_reported',
-                shipmentId,
-                nextPhase: 'failed',
-                note: `${reason}${note ? ': ' + note : ''}`,
-                proofPhotoPath: photoUrl ?? null,
-                payload: { failureReason: reason },
-              })),
-              set,
-              get().loadShipments
-            ),
+            reportDeliveryFailure({
+              shipmentId: id,
+              failureReason: reason,
+              note: `${reason}${note ? ': ' + note : ''}`,
+              returnType,
+              returnItems,
+              proofPhotoPath: photoUrl ?? null,
+            }).then(() => {
+              void get().loadShipments();
+            }),
           set,
           get().loadShipments,
           () => get().isLoading

@@ -7,6 +7,7 @@ import { Link, useParams } from "react-router";
 import {
   ChatBubbleLeftRightIcon,
   ChevronRightIcon,
+  PencilSquareIcon,
   PhoneIcon,
   UserCircleIcon,
 } from "@heroicons/react/24/outline";
@@ -33,6 +34,7 @@ import {
   type TicketItem,
 } from "../../lib/customer-service";
 import { supabase } from "../../lib/supabase";
+import EditTicketModal from "../../components/customer-service/EditTicketModal";
 
 interface TicketDetailRecord {
   id: string;
@@ -192,6 +194,7 @@ export default function TicketDetailPage() {
   const [users, setUsers] = useState<{ id: string; full_name: string }[]>([]);
   const [ticketItems, setTicketItems] = useState<TicketItem[]>([]);
   const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [orderActivity, setOrderActivity] = useState<Array<{
     id: string;
     type: "visit";
@@ -463,6 +466,16 @@ export default function TicketDetailPage() {
                   <span>
                     في: <strong className="font-semibold text-gray-800 dark:text-gray-100">{formatDateTime(ticket.created_at)}</strong>
                   </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditModalOpen(true)}
+                      className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:border-blue-500/30 dark:hover:bg-blue-500/10 dark:hover:text-blue-300"
+                    >
+                      <PencilSquareIcon className="h-4 w-4" aria-hidden />
+                      تعديل
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -777,6 +790,19 @@ export default function TicketDetailPage() {
           </div>
         </div>
       </AdminPageFrame>
+
+      {ticket && profile ? (
+        <EditTicketModal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          onUpdated={() => {
+            setIsEditModalOpen(false);
+            void loadTicket();
+          }}
+          ticket={ticket}
+          currentUserId={profile.id}
+        />
+      ) : null}
     </>
   );
 }

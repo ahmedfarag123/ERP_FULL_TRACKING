@@ -1,4 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState, useMemo } from "react";
+import { Download } from "lucide-react";
 import { AdminSection } from "./AdminPageElements";
 import { supabase } from "../../lib/supabase";
 import {
@@ -8,11 +10,22 @@ import {
   type TripPing,
   type TripWarehouse,
 } from "../../lib/tripAnalytics";
+import type { MapPlanAssignee } from "./AdminLiveTrackingMap";
+import { exportTripAnalysisWorkbook } from "../../lib/excel-export";
 
 type Props = {
   driverId: string | null;
   driverName?: string;
+  assignees?: MapPlanAssignee[];
 };
+
+type Period = "day" | "week" | "month";
+
+const PERIOD_OPTIONS: { value: Period; label: string; days: number }[] = [
+  { value: "day", label: "اليوم", days: 1 },
+  { value: "week", label: "آخر 7 أيام", days: 7 },
+  { value: "month", label: "آخر 30 يوم", days: 30 },
+];
 
 const ACTIVE_PLAN_STATUSES = ["pending", "in_progress"];
 
@@ -20,6 +33,17 @@ function todayStartIso(): string {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d.toISOString();
+}
+
+function periodSinceIso(period: Period): string {
+  const days = PERIOD_OPTIONS.find((p) => p.value === period)?.days ?? 1;
+  const d = new Date(Date.now() - days * 86400000);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+function periodLabel(period: Period): string {
+  return PERIOD_OPTIONS.find((p) => p.value === period)?.label ?? "اليوم";
 }
 
 function todayDateLabel(): string {
@@ -42,8 +66,9 @@ function mins(seconds: number): number {
   return Math.round(seconds / 60);
 }
 
-async function fetchTripAnalysis(driverId: string) {
-  const since = todayStartIso();
+async function fetchTripAnalysis(driverId: string, period: Period) {
+  const since = period === "day" ? todayStartIso() : periodSinceIso(period);
+  const days = PERIOD_OPTIONS.find((p) => p.value === period)?.days ?? 1;
 
   const { data: pings, error: pingsErr } = await supabase
     .from("location_tracking")
@@ -51,7 +76,7 @@ async function fetchTripAnalysis(driverId: string) {
     .eq("user_id", driverId)
     .gte("captured_at", since)
     .order("captured_at", { ascending: true })
-    .limit(3000);
+    .limit(Math.min(days * 2000, 30000));
   if (pingsErr) throw pingsErr;
 
   const mappedPings: TripPing[] = (pings ?? []).map((p) => ({
@@ -61,12 +86,16 @@ async function fetchTripAnalysis(driverId: string) {
     accuracyMeters: p.accuracy_meters !== null && p.accuracy_meters !== undefined ? Number(p.accuracy_meters) : null,
   }));
 
+  const sinceDate = since.slice(0, 10);
+  const untilDate = new Date().toISOString().slice(0, 10);
+
   const { data: plans } = await supabase
     .from("logistics_delivery_plans")
     .select("id")
     .eq("assigned_profile_id", driverId)
-    .in("plan_status", ACTIVE_PLAN_STATUSES)
-    .eq("planned_date", new Date().toISOString().slice(0, 10));
+    .in("plan_status", [...ACTIVE_PLAN_STATUSES, "completed"])
+    .gte("planned_date", sinceDate)
+    .lte("planned_date", untilDate);
 
   const planIds = (plans ?? []).map((p) => p.id);
   const customers: TripCustomer[] = [];
@@ -128,19 +157,37 @@ function statusLabel(status: string | null): string {
   return STATUS_LABELS[status] ?? status;
 }
 
-export default function TripAnalyticsPanel({ driverId, driverName }: Props) {
+export default function TripAnalyticsPanel({ driverId, driverName, assignees = [] }: Props) {
+  const [period, setPeriod] = useState<Period>("day");
+  const [selectedPerson, setSelectedPerson] = useState<string | null>(null);
+
+  const personId = selectedPerson ?? driverId;
+
   const { data, isLoading } = useQuery({
-    queryKey: ["logistics", "trip-analysis", driverId ?? "none"],
-    queryFn: () => fetchTripAnalysis(driverId as string),
-    enabled: Boolean(driverId),
-    refetchInterval: 30_000,
+    queryKey: ["logistics", "trip-analysis", personId ?? "none", period],
+    queryFn: () => fetchTripAnalysis(personId as string, period),
+    enabled: Boolean(personId),
+    refetchInterval: period === "day" ? 30_000 : false,
   });
+
+  const allPeople = useMemo(() => {
+    const list: { id: string; name: string; role: string }[] = [];
+    if (driverId && driverName) {
+      list.push({ id: driverId, name: driverName, role: "سائق" });
+    }
+    for (const a of assignees) {
+      if (a.profileId !== driverId) {
+        list.push({ id: a.profileId, name: a.displayName, role: "مشارك" });
+      }
+    }
+    return list;
+  }, [driverId, driverName, assignees]);
 
   if (!driverId) {
     return (
       <AdminSection
         title="تحليل خط السير"
-        description="اضغط على سائق في الخريطة لمشاهدة تفاصيل وقوفه وتنقلاته اليوم"
+        description="اضغط على سائق في الخريطة لمشاهدة تفاصيل وقوفه وتنقلاته"
       >
         <div className="flex items-center gap-3 rounded-xl bg-gray-50 px-4 py-6 text-sm text-gray-500 dark:bg-white/[0.02] dark:text-gray-400">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -148,7 +195,7 @@ export default function TripAnalyticsPanel({ driverId, driverName }: Props) {
             <path d="M14 10 21 3" />
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
           </svg>
-          <span>حدد سائقًا من قائمة «السائقون» بالخريطة ثم تابع التحليل هنا</span>
+          <span>حدد سائقًا من قائمة «المشاركون» بالخريطة ثم تابع التحليل هنا</span>
         </div>
       </AdminSection>
     );
@@ -157,13 +204,73 @@ export default function TripAnalyticsPanel({ driverId, driverName }: Props) {
   return (
     <AdminSection
       title="تحليل خط السير"
-      description={`${driverName ? `${driverName} · ` : ""}${todayDateLabel()}`}
+      description={allPeople.length > 1
+        ? `كل المسندين — ${todayDateLabel()}`
+        : `${driverName ? `${driverName} · ` : ""}${todayDateLabel()}`
+      }
     >
+      {allPeople.length > 1 && (
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {allPeople.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setSelectedPerson(p.id === driverId ? null : p.id)}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold transition-colors ${
+                (selectedPerson ?? driverId) === p.id
+                  ? "bg-brand-600 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-white/[0.04] dark:text-gray-300 dark:hover:bg-white/[0.08]"
+              }`}
+            >
+              {p.role === "مشارك" && (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+              )}
+              {p.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="mb-3 flex items-center gap-2">
+        <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-gray-50 p-0.5 dark:border-gray-700 dark:bg-white/[0.02]">
+          {PERIOD_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setPeriod(opt.value)}
+              className={`px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                period === opt.value
+                  ? "bg-brand-600 text-white shadow-sm"
+                  : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {data && data.pings >= 2 && (
+          <button
+            onClick={() => {
+              const person = allPeople.find((p) => (selectedPerson ?? driverId) === p.id);
+              if (person && data) {
+                exportTripAnalysisWorkbook({
+                  periodLabel: periodLabel(period),
+                  entries: [{ name: person.name, role: person.role, summary: data, stops: data.stops }],
+                });
+              }
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700 transition-colors"
+          >
+            <Download size={13} />
+            تحميل Excel
+          </button>
+        )}
+      </div>
+
       {isLoading ? (
         <div className="h-40 animate-pulse rounded-xl bg-gray-100 dark:bg-white/[0.03]" />
       ) : !data || data.pings < 2 ? (
         <div className="rounded-xl bg-gray-50 px-4 py-6 text-sm text-gray-500 dark:bg-white/[0.02] dark:text-gray-400">
-          لا توجد بيانات تتبع اليوم لهذا السائق بعد. تظهر التحليلات فور بدء إرسال المواقع.
+          لا توجد بيانات تتبع لهذه الفترة. تظهر التحليلات فور بدء إرسال المواقع.
         </div>
       ) : (
         <div className="space-y-4">

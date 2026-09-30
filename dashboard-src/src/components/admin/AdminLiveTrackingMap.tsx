@@ -54,6 +54,14 @@ export type MapDriverTrack = {
   points: Array<{ lat: number; lng: number }>;
 };
 
+export type MapPlanAssignee = {
+  profileId: string;
+  displayName: string;
+  latitude?: number;
+  longitude?: number;
+  updatedAt?: string;
+};
+
 export type MapShipmentStop = {
   id: string;
   customerName: string | null;
@@ -75,6 +83,7 @@ export type MapPlanRoute = {
   driverLatitude?: number;
   driverLongitude?: number;
   stops: MapShipmentStop[];
+  assignees?: MapPlanAssignee[];
 };
 
 export type MapPrimaryWarehouse = {
@@ -245,7 +254,7 @@ async function fetchOrsRoute(
   try {
     const res = await fetch("https://api.openrouteservice.org/v2/directions/driving-car/geojson", {
       method: "POST",
-      headers: { Authorization: `Bearer ${ORS_API_KEY}`, "Content-Type": "application/json" },
+      headers: { Authorization: ORS_API_KEY, "Content-Type": "application/json" },
       body: JSON.stringify({ coordinates: unique.map((p) => [p.lng, p.lat]) }),
     });
     if (!res.ok) return null;
@@ -468,6 +477,7 @@ function DriverCard({
     plans: { planId: string; planReference: string; planStatus?: string | null; stops: MapShipmentStop[]; warehouseName: string }[];
     totalStops: number;
     totalDist: number;
+    assignees: MapPlanAssignee[];
   };
   color: string;
   isSelected: boolean;
@@ -533,6 +543,16 @@ function DriverCard({
                 {driver.plans.length > 1 ? ` +${driver.plans.length - 1}` : ""}
               </span>
             </div>
+            {driver.assignees.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {driver.assignees.map((a) => (
+                  <span key={a.profileId} className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-semibold text-amber-700 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:ring-amber-800">
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    {a.displayName}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
           <span
             className="rounded-md px-1.5 py-0.5 text-[10px] font-bold text-white shrink-0"
@@ -620,21 +640,46 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse, tracks, onDriverSe
     plans: typeof plansWithSortedStops;
     totalStops: number;
     totalDist: number;
+    assignees: MapPlanAssignee[];
   };
 
   const driversWithPlans: DriverWithPlans[] = useMemo(() => {
     const map = new Map<string, DriverWithPlans>();
+    const allAssignees = new Map<string, MapPlanAssignee[]>();
     for (const plan of plansWithSortedStops) {
       let entry = map.get(plan.driverId);
       if (!entry) {
-        entry = { driverId: plan.driverId, driverName: plan.driverName, plans: [], totalStops: 0, totalDist: 0 };
+        entry = { driverId: plan.driverId, driverName: plan.driverName, plans: [], totalStops: 0, totalDist: 0, assignees: [] };
         map.set(plan.driverId, entry);
       }
       entry.plans.push(plan);
       entry.totalStops += plan.stops.length;
       entry.totalDist += computeTotalDistanceKm(plan.stops, { lat: plan.warehouseLatitude, lng: plan.warehouseLongitude });
+      for (const a of plan.assignees ?? []) {
+        if (!allAssignees.has(plan.driverId)) allAssignees.set(plan.driverId, []);
+        if (!allAssignees.get(plan.driverId)!.some((x) => x.profileId === a.profileId)) {
+          allAssignees.get(plan.driverId)!.push(a);
+        }
+      }
     }
-    return [...map.values()];
+    for (const entry of map.values()) {
+      entry.assignees = allAssignees.get(entry.driverId) ?? [];
+    }
+    const result = [...map.values()];
+    for (const plan of plansWithSortedStops) {
+      for (const a of plan.assignees ?? []) {
+        if (result.some((r) => r.driverId === a.profileId)) continue;
+        result.push({
+          driverId: a.profileId,
+          driverName: a.displayName,
+          plans: [plan],
+          totalStops: plan.stops.length,
+          totalDist: computeTotalDistanceKm(plan.stops, { lat: plan.warehouseLatitude, lng: plan.warehouseLongitude }),
+          assignees: [],
+        });
+      }
+    }
+    return result;
   }, [plansWithSortedStops]);
 
   const grayPlanIds = useMemo(() => {
@@ -714,7 +759,8 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse, tracks, onDriverSe
   const totalStats = useMemo(() => {
     const stops = driversWithPlans.reduce((sum, d) => sum + d.totalStops, 0);
     const dist = driversWithPlans.reduce((sum, d) => sum + d.totalDist, 0);
-    return { drivers: driversWithPlans.length, plans: plansWithSortedStops.length, stops, dist };
+    const totalPeople = driversWithPlans.reduce((sum, d) => sum + 1 + d.assignees.length, 0);
+    return { drivers: totalPeople, plans: plansWithSortedStops.length, stops, dist };
   }, [driversWithPlans, plansWithSortedStops]);
 
   const mainWarehouse = useMemo(() => {
@@ -898,6 +944,70 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse, tracks, onDriverSe
             />
           ) : null}
 
+          {/* Connector lines between driver and assignees */}
+          {filteredPlans.map((plan) => {
+            if (!plan.assignees?.length) return null;
+            const driverLoc = filteredDrivers.find((d) => d.driverId === plan.driverId);
+            if (!driverLoc || driverLoc.latitude === 0 || driverLoc.longitude === 0) return null;
+            return plan.assignees
+              .filter((a) => a.latitude && a.longitude && a.latitude !== 0 && a.longitude !== 0)
+              .map((a) => {
+                const idx = driverIndexMap.get(plan.driverId) ?? 0;
+                const color = grayPlanIds.has(plan.planId) ? SECONDARY_PLAN_COLOR : driverColor(idx);
+                return (
+                  <Polyline
+                    key={`connector-${plan.driverId}-${a.profileId}`}
+                    positions={[
+                      [driverLoc.latitude, driverLoc.longitude],
+                      [a.latitude!, a.longitude!],
+                    ]}
+                    pathOptions={{
+                      color,
+                      weight: 2,
+                      opacity: 0.45,
+                      dashArray: "6 8",
+                      lineCap: "round",
+                    }}
+                  />
+                );
+              });
+          })}
+
+          {/* Assignee markers */}
+          {filteredPlans.map((plan) => {
+            const idx = driverIndexMap.get(plan.driverId) ?? 0;
+            const color = grayPlanIds.has(plan.planId) ? SECONDARY_PLAN_COLOR : driverColor(idx);
+            return (plan.assignees ?? [])
+              .filter((a) => a.latitude && a.longitude && a.latitude !== 0 && a.longitude !== 0)
+              .map((a) => {
+                const icon = L.divIcon({
+                  className: "",
+                  html: `<div style="width:28px;height:28px;border-radius:50%;background:${color}88;border:2.5px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.25);"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>`,
+                  iconSize: [28, 28],
+                  iconAnchor: [14, 14],
+                });
+                return (
+                  <Marker
+                    key={`assignee-${plan.planId}-${a.profileId}`}
+                    position={[a.latitude!, a.longitude!]}
+                    icon={icon}
+                  >
+                    <Tooltip direction="top" offset={[0, -16]} opacity={1}>
+                      <div style={{ fontFamily: "sans-serif", textAlign: "right", direction: "rtl", minWidth: 100 }}>
+                        <div className="flex items-center gap-1.5">
+                          <span className="inline-block h-2 w-2 rounded-full" style={{ background: color }} />
+                          <span className="text-xs font-bold text-gray-900 dark:text-white">{a.displayName}</span>
+                        </div>
+                        <div className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+                          مشارك · {plan.planReference}
+                        </div>
+                      </div>
+                    </Tooltip>
+                  </Marker>
+                );
+              });
+          })}
+
           {/* Stop markers */}
           {filteredPlans.map((plan) => {
             const idx = driverIndexMap.get(plan.driverId) ?? 0;
@@ -1006,7 +1116,7 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse, tracks, onDriverSe
               <span className="inline-block h-3 w-3 rounded bg-gradient-to-br from-gray-500 to-gray-700" />
               المستودع
             </span>
-            {(selectedDriverId ? driversWithPlans.filter((dp) => dp.driverId === selectedDriverId) : driversWithPlans).map((dp) => {
+              {(selectedDriverId ? driversWithPlans.filter((dp) => dp.driverId === selectedDriverId) : driversWithPlans).map((dp) => {
               const idx = driverIndexMap.get(dp.driverId) ?? 0;
               const color = driverColor(idx);
               return (
@@ -1025,6 +1135,11 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse, tracks, onDriverSe
                       مكتملة
                     </span>
                   )}
+                  {dp.assignees.length > 0 && dp.assignees.map((a) => (
+                    <span key={a.profileId} className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[8px] font-bold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
+                      ↪ {a.displayName}
+                    </span>
+                  ))}
                 </span>
               );
             })}
@@ -1058,6 +1173,16 @@ function TrackingMapInner({ drivers, plans, primaryWarehouse, tracks, onDriverSe
                     <span>{dp.totalStops} نقطة</span>
                     <span>{dp.totalDist.toFixed(1)} كم</span>
                   </div>
+                  {dp.assignees.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {dp.assignees.map((a) => (
+                        <span key={a.profileId} className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
+                          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                          {a.displayName}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })()}

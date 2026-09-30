@@ -121,6 +121,7 @@ const navItems: NavItem[] = [
     subItems: [
       { name: "لوحة اللوجستيات", path: "/logistics", requiredPermissions: ["logistics.view"] },
       { name: "تحليلات التوصيل", path: "/logistics/analytics", requiredPermissions: ["logistics.view"] },
+      { name: "تحليل OTIF", path: "/logistics/otif", requiredPermissions: ["logistics.view"] },
       { name: "الشحنات", path: "/logistics/shipments", requiredPermissions: ["logistics.view"] },
       { name: "الخطط", path: "/logistics/plans", requiredPermissions: ["logistics.view"] },
       { name: "خطة جديدة", path: "/logistics/plans/new", requiredPermissions: ["logistics.manage"] },

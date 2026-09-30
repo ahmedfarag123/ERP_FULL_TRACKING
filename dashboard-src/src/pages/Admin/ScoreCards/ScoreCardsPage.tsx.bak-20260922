@@ -1,0 +1,770 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowPathIcon, CalendarDaysIcon, CheckCircleIcon, ClockIcon, SparklesIcon } from "@heroicons/react/24/outline";
+import PageMeta from "../../../components/common/PageMeta";
+import {
+  AdminPageFrame,
+  AdminPageHero,
+  AdminHeroPill,
+  AdminMetricGrid,
+  AdminSection,
+  TabButton,
+} from "../../../components/admin/AdminPageElements";
+import { DEPARTMENT_ORDER, DEPARTMENT_LABELS, getScorecardsByDepartment, isGoodDelta, STATIC_SCORECARD_VALUES, type ScorecardDef } from "../../../data/scorecards";
+import {
+  fetchSaturdayContext,
+  fetchScorecardHistory,
+  fetchScorecardLive,
+  formatScorecardValue,
+  type SaturdayContext,
+  type ScorecardValue,
+} from "../../../lib/scorecards";
+import CustomerServiceAnalytics from "../CustomerServiceAnalytics";
+
+type QuickRange = "all" | "today" | "yesterday" | "7d" | "30d" | "prev-month";
+
+const RECOMPUTABLE_WINDOW_KEYS = new Set([
+  "finance.cancelled_invoices",
+  "finance.invoicing_over_12h",
+  "finance.invoicing_over_24h",
+  "finance.expenses_budget",
+  "collection.sales_approved_credit_policy",
+  "sales.gmv_mas",
+  "sales.mas_customers",
+  "sales.mas_average_order",
+  "sales.products_sold_mas",
+  "sales.gmv_horeca",
+  "sales.horeca_customers",
+  "sales.horeca_average_order",
+  "sales.products_sold_horeca",
+  "sales.crm_activities",
+  "purchase.stockout_top100",
+  "purchase.new_products",
+  "purchase.products_purchased",
+  "purchase.purchase_orders",
+  "purchase.accuracy_of_purchase",
+  "purchase.receipts_date_24h",
+  "purchase.gross_margin_mas",
+  "purchase.gross_margin_horeca",
+  "purchase.variance_of_prices",
+]);
+
+const QUICK_RANGES: { key: QuickRange; label: string }[] = [
+  { key: "all", label: "الكُل" },
+  { key: "today", label: "اليوم" },
+  { key: "yesterday", label: "أمس" },
+  { key: "7d", label: "آخر ٧ أيام" },
+  { key: "30d", label: "آخر ٣٠ يوم" },
+  { key: "prev-month", label: "الشهر اللي فات" },
+];
+
+function rangeForQuick(key: QuickRange): { from: string; to: string } {
+  const now = new Date();
+  const y = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  switch (key) {
+    case "all":
+      return { from: "", to: "" };
+    case "today":
+      return { from: y(now), to: y(now) };
+    case "yesterday": {
+      const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      return { from: y(day), to: y(day) };
+    }
+    case "7d": {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+      return { from: y(start), to: y(now) };
+    }
+    case "30d": {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
+      return { from: y(start), to: y(now) };
+    }
+    case "prev-month": {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0);
+      return { from: y(start), to: y(end) };
+    }
+  }
+}
+
+function ScorecardMeta({ def }: { def: ScorecardDef }) {
+  const meta = `${def.module} › ${def.view} › ${def.field}`;
+  return <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{meta}</p>;
+}
+
+function topLabel(def: ScorecardDef): string {
+  const view = String(def.view ?? "").toLowerCase();
+  if (view === "bills") return "Top Vendors";
+  if (view === "invoices") return "Top Customers";
+  if (view === "orders") return "Top Orders";
+  if (view.includes("general ledger")) return "Top Balances";
+  return "Top";
+}
+
+function compactCash(value: number | null): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) {
+    const m = value / 1_000_000;
+    const formatted = m.toFixed(1).replace(".", ",");
+    return `${formatted}M`;
+  }
+  if (abs >= 1_000) {
+    const k = value / 1_000;
+    return `${k.toFixed(1).replace(".", ",")}K`;
+  }
+  return String(Math.round(value));
+}
+
+function saturdaySummary(row: ScorecardValue | null, fallback: string, summaryFirst?: "amount" | "count"): string {
+  if (!row) return fallback;
+  const count = row.metadata?.customerCount ?? row.metadata?.invoiceCount ?? row.metadata?.orderCount;
+  const gmvTotal = row.metadata?.gmvTotal;
+  const amount = gmvTotal != null ? compactCash(gmvTotal) : compactCash(row.value);
+  if (count === null || count === undefined) return amount;
+  return summaryFirst === "amount" ? `${amount} (${compactCash(count)})` : `${count} (${amount})`;
+}
+
+function ImplementedCard({
+  def,
+  latest,
+  saturdays,
+  isUpdating,
+  windowValue,
+  showPointInTimeNote,
+}: {
+  def: ScorecardDef;
+  latest?: ScorecardValue | null;
+  saturdays: ScorecardValue[];
+  isUpdating: boolean;
+  windowValue?: ScorecardValue | null;
+  showPointInTimeNote?: boolean;
+}) {
+  const updatedAt = latest?.created_at ? latest.created_at.slice(5, 16).replace("T", " ") : null;
+  const vendors = latest?.metadata?.topVendors ?? [];
+  const customerCount = latest?.metadata?.customerCount ?? null;
+  const odooActivities = latest?.metadata?.odooActivities ?? null;
+  const lastSaturday = saturdays[0] ?? null;
+  const prevSaturday = saturdays[1] ?? null;
+  const display = windowValue ?? latest;
+  const isWindow = Boolean(windowValue);
+  const weekly = (display?.metadata?.weekly ?? []) as { label: string; dayLabel: string; count: number }[];
+  const delta =
+    weekly.length >= 2 && weekly[0]?.count != null && weekly[1]?.count != null
+      ? weekly[0].count - weekly[1].count
+      : !latest || latest.value == null || !lastSaturday || lastSaturday.value == null
+        ? null
+        : latest.value - lastSaturday.value;
+  const deltaPct =
+    delta !== null && weekly.length >= 2 && weekly[0]?.count != null && weekly[1]?.count != null
+      ? ((delta / Math.abs(weekly[1].count)) * 100).toFixed(2)
+      : delta !== null && lastSaturday?.value
+        ? ((delta / Math.abs(lastSaturday.value)) * 100).toFixed(2)
+        : null;
+  const neutral = delta === null;
+  const good = isGoodDelta(def, delta);
+  const isGood = good === true;
+  const frameClass = good === null
+    ? "border-emerald-200 bg-white dark:border-emerald-500/30 dark:bg-white/[0.04]"
+    : isGood
+      ? "border-emerald-300 bg-emerald-50/50 dark:border-emerald-500/40 dark:bg-emerald-500/[0.07]"
+      : "border-rose-300 bg-rose-50/50 dark:border-rose-500/40 dark:bg-rose-500/[0.07]";
+  const deltaChipClass = isGood
+    ? "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20"
+    : "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-500/20";
+
+  return (
+    <article className={`rounded-2xl border p-5 md:p-6 ${frameClass}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+            {def.scorecard}
+          </p>
+          <div className={`mt-3 text-3xl font-semibold tracking-tight text-gray-900 dark:text-white ${isUpdating ? "animate-pulse" : ""}`}>
+            {latest === undefined
+              ? "…"
+              : formatScorecardValue(display?.value ?? null, display?.currency ?? "EGP")}
+          </div>
+          {customerCount !== null ? (
+            <p className="mt-1.5 text-sm font-semibold text-gray-600 dark:text-gray-300">
+              موزعة على <span className="tabular-nums text-emerald-600 dark:text-emerald-400">{customerCount}</span> عميل
+            </p>
+          ) : null}
+          {odooActivities !== null ? (
+            <p className="mt-1.5 text-sm font-semibold text-gray-600 dark:text-gray-300">
+              {odooActivities} <span className="text-xs font-normal text-gray-500 dark:text-gray-400">أنشطة Odoo CRM</span>
+            </p>
+          ) : null}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {isWindow ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-brand-25 px-2.5 py-0.5 text-[11px] font-medium text-gray-600 ring-1 ring-brand-200 dark:bg-white/10 dark:text-gray-300 dark:ring-white/20">
+                <SparklesIcon className="h-3.5 w-3.5" /> قيمة الفترة من Odoo
+              </span>
+            ) : null}
+            {!isWindow && showPointInTimeNote ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 px-2.5 py-0.5 text-[11px] font-medium text-gray-500 ring-1 ring-gray-200 dark:bg-white/10 dark:text-gray-400 dark:ring-white/15">
+                لحظي — القيمة الحالية مش بتاريخ الفترة
+              </span>
+            ) : null}
+            {delta !== null ? (
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ${deltaChipClass}`}>
+                {delta >= 0 ? "Δ +" : "Δ −"}
+                {deltaPct}%
+              </span>
+            ) : null}
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20">
+              <CheckCircleIcon className="h-3.5 w-3.5" /> مفعّل
+            </span>
+            {latest === null && !isWindow ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/20">
+                لا توجد snapshots في هذه الفترة
+              </span>
+            ) : null}
+            {updatedAt ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-brand-25 px-2.5 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300">
+                <ClockIcon className="h-3.5 w-3.5" /> {updatedAt}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      {weekly.length > 1 ? (
+        <div className="mt-4 space-y-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-gray-400 dark:text-gray-500">
+            الأسابيع السابقة (خميس → أربعاء)
+          </p>
+          {weekly.slice(1).map((week, index) => {
+            const prev = weekly[index + 2];
+            const deltaChip = prev
+              ? week.count > prev.count
+                ? "text-rose-600 dark:text-rose-400"
+                : week.count < prev.count
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-gray-400 dark:text-gray-500"
+              : "";
+            return (
+              <div key={week.label} className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                  {index === 0 ? "الأسبوع اللي فات · " : "اللي قبله · "}
+                  {week.dayLabel}
+                </span>
+                <span className="font-semibold tabular-nums text-gray-900 dark:text-white">
+                  {week.count}
+                  {prev ? (
+                    <span className={`ml-1.5 text-[11px] font-medium ${deltaChip}`}>
+                      ({week.count - prev.count >= 0 ? "+" : ""}{week.count - prev.count})
+                    </span>
+                  ) : null}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {saturdays.length > 0 ? (
+        <div className="mt-4 space-y-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-gray-400 dark:text-gray-500">
+            رقم السبت
+          </p>
+          {lastSaturday ? (
+            <div className="flex items-center justify-between gap-2 text-sm">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                السبت {lastSaturday.created_at?.slice(5, 10).replace("-", "/")}
+              </span>
+              <span className="font-semibold tabular-nums text-gray-900 dark:text-white">
+                {saturdaySummary(lastSaturday, formatScorecardValue(lastSaturday.value, lastSaturday.currency ?? "EGP"), def.summaryFirst)}
+              </span>
+            </div>
+          ) : null}
+          {prevSaturday ? (
+            <div className="flex items-center justify-between gap-2 text-sm">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                السبت {prevSaturday.created_at?.slice(5, 10).replace("-", "/")}
+              </span>
+              <span className="font-semibold tabular-nums text-gray-400 dark:text-gray-500">
+                {saturdaySummary(prevSaturday, formatScorecardValue(prevSaturday.value, prevSaturday.currency ?? "EGP"), def.summaryFirst)}
+              </span>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
+          رقم السبت هيظهر أول سبت بيتثبت فيه snapshot.
+        </p>
+      )}
+
+      <ScorecardMeta def={def} />
+      {display?.note ? <p className="mt-2 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{display.note}</p> : null}
+      {def.key !== "finance.unreconciled_bills" && def.key !== "finance.unreconciled_invoices" && vendors.length > 0 ? (
+        <div className="mt-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-gray-400 dark:text-gray-500">
+            {topLabel(def)}
+          </p>
+          <table className="mt-2 w-full text-left text-sm">
+            <tbody>
+              {vendors.map((vendor) => (
+                <tr key={vendor.id} className="border-t border-gray-100 dark:border-gray-800">
+                  <td className="py-1.5 pr-3 text-gray-700 dark:text-gray-300">{vendor.name}</td>
+                  <td className="py-1.5 text-right font-medium tabular-nums text-gray-900 dark:text-white">
+                    {formatScorecardValue(vendor.outstanding, "EGP")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function PendingCard({ def }: { def: ScorecardDef }) {
+  return (
+    <article className="rounded-2xl border border-dashed border-gray-300 bg-gray-50/60 p-5 opacity-70 dark:border-gray-700 dark:bg-white/[0.02] md:p-6">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+            {def.scorecard}
+          </p>
+          <div className="mt-3 flex items-center gap-2 text-2xl font-semibold tracking-tight text-gray-400 dark:text-gray-600">
+            <SparklesIcon className="h-5 w-5" />
+            قريباً
+          </div>
+        </div>
+      </div>
+      <ScorecardMeta def={def} />
+    </article>
+  );
+}
+
+function StaticCard({ def }: { def: ScorecardDef }) {
+  const value = STATIC_SCORECARD_VALUES[def.key];
+  if (!value) return <PendingCard def={def} />;
+  const delta =
+    Number.isFinite(value.current) && Number.isFinite(value.previous) && value.current !== value.previous
+      ? value.current - value.previous
+      : null;
+  const deltaPct =
+    delta !== null && Number.isFinite(value.previous) && value.previous !== 0
+      ? (Math.abs(delta) / Math.abs(value.previous)) * 100
+      : null;
+  const good = delta !== null ? isGoodDelta({ goodWhen: value.goodWhen ?? "higher" }, delta) : null;
+  const isGood = good === true;
+  const frameClass =
+    good === null
+      ? "border-emerald-200 bg-white dark:border-emerald-500/30 dark:bg-white/[0.04]"
+      : isGood
+        ? "border-emerald-300 bg-emerald-50/50 dark:border-emerald-500/40 dark:bg-emerald-500/[0.07]"
+        : "border-rose-300 bg-rose-50/50 dark:border-rose-500/40 dark:bg-rose-500/[0.07]";
+  const deltaChipClass =
+    good === null
+      ? "bg-gray-50 text-gray-600 ring-gray-200 dark:bg-white/10 dark:text-gray-300 dark:ring-white/15"
+      : isGood
+        ? "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20"
+        : "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-500/20";
+  return (
+    <article className={`rounded-2xl border p-5 md:p-6 ${frameClass}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+            {def.scorecard}
+          </p>
+          <div className="mt-3 text-3xl font-semibold tracking-tight text-gray-900 dark:text-white">
+            {value.value}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-25 px-2.5 py-0.5 text-[11px] font-medium text-gray-600 ring-1 ring-brand-200 dark:bg-white/10 dark:text-gray-300 dark:ring-white/20">
+              <SparklesIcon className="h-3.5 w-3.5" /> أسبوعي من التقرير
+            </span>
+            {delta !== null ? (
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ${deltaChipClass}`}>
+                {delta >= 0 ? "Δ +" : "Δ −"}
+                {deltaPct !== null ? `${deltaPct.toFixed(0)}%` : ""}
+              </span>
+            ) : (
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ${deltaChipClass}`}>
+                Δ 0%
+              </span>
+            )}
+            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ${deltaChipClass}`}>
+              <CheckCircleIcon className="h-3.5 w-3.5" /> {isGood ? "إيجابي" : good === null ? "محايد" : "سلبي"}
+            </span>
+          </div>
+        </div>
+      </div>
+      <p className="mt-4 text-xs font-medium text-gray-500 dark:text-gray-400">
+        Last Week: <span className="font-semibold tabular-nums text-gray-700 dark:text-gray-300">{value.lastWeek}</span>
+      </p>
+      <ScorecardMeta def={def} />
+    </article>
+  );
+}
+
+export default function ScoreCardsPage() {
+  const [activeDepartment, setActiveDepartment] = useState<string>(DEPARTMENT_ORDER[0]);
+  const [ctxByKey, setCtxByKey] = useState<Record<string, SaturdayContext>>({});
+  const [historyByKey, setHistoryByKey] = useState<Record<string, ScorecardValue[]>>({});
+  const [windowLiveByKey, setWindowLiveByKey] = useState<Record<string, ScorecardValue | null>>({});
+  const [historyKey, setHistoryKey] = useState<string>("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const activeCards = getScorecardsByDepartment(activeDepartment);
+  const implemented = activeCards.filter((s) => s.implemented);
+  const implementedKeys = useMemo(() => implemented.map((s) => s.key), [activeDepartment]);
+
+  const window = {
+    from: from ? `${from}T00:00:00` : null,
+    to: to ? `${to}T23:59:59.999` : null,
+  };
+
+  const contextSeq = useRef(0);
+  const historySeq = useRef(0);
+  const hasRange = Boolean(from || to);
+
+  const loadContexts = useCallback(async () => {
+    const seq = ++contextSeq.current;
+    for (const key of implementedKeys) {
+      try {
+        const ctx = await fetchSaturdayContext({ key });
+        if (seq !== contextSeq.current) return;
+        setCtxByKey((previous) => ({ ...previous, [key]: ctx }));
+      } catch (err) {
+        if (seq !== contextSeq.current) return;
+        setError(err instanceof Error ? err.message : "Failed to load snapshot context.");
+      }
+    }
+  }, [implementedKeys]);
+
+  const loadHistory = useCallback(async () => {
+    if (!historyKey || !implementedKeys.includes(historyKey)) return;
+    const seq = ++historySeq.current;
+    try {
+      const rows = await fetchScorecardHistory({
+        key: historyKey,
+        from: window.from,
+        to: window.to,
+      });
+      let windowLive: ScorecardValue | null = null;
+      if (hasRange && RECOMPUTABLE_WINDOW_KEYS.has(historyKey)) {
+        try {
+          const { fresh } = await fetchScorecardLive([historyKey], { from, to });
+          windowLive = fresh[historyKey] ?? null;
+        } catch {
+          // live window fetch is best-effort; fall back to snapshots only
+        }
+      }
+      if (seq !== historySeq.current) return;
+      setHistoryByKey((previous) => ({ ...previous, [historyKey]: rows }));
+      setWindowLiveByKey((previous) => ({ ...previous, [historyKey]: windowLive }));
+    } catch (err) {
+      if (seq !== historySeq.current) return;
+      setError(err instanceof Error ? err.message : "Failed to load history.");
+    }
+  }, [historyKey, implementedKeys, window.from, window.to, hasRange, from, to]);
+
+  const windowSeq = useRef(0);
+  const loadWindowValues = useCallback(async () => {
+    const seq = ++windowSeq.current;
+    if (!hasRange) {
+      setWindowLiveByKey({});
+      return;
+    }
+    const recKeys = implementedKeys.filter((key) => RECOMPUTABLE_WINDOW_KEYS.has(key));
+    if (recKeys.length === 0) {
+      setWindowLiveByKey({});
+      return;
+    }
+    try {
+      const { fresh } = await fetchScorecardLive(recKeys, { from, to });
+      if (seq !== windowSeq.current) return;
+      setWindowLiveByKey(fresh);
+    } catch {
+      if (seq !== windowSeq.current) return;
+      setWindowLiveByKey({});
+    }
+  }, [hasRange, implementedKeys, from, to]);
+
+  useEffect(() => {
+    void loadWindowValues();
+  }, [loadWindowValues]);
+
+  useEffect(() => {
+    if (implementedKeys.length === 0) {
+      setCtxByKey({});
+      setHistoryByKey({});
+      return;
+    }
+    void loadContexts();
+  }, [implementedKeys, loadContexts]);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
+
+  useEffect(() => {
+    if (implementedKeys.length > 0 && !implementedKeys.includes(historyKey)) {
+      setHistoryKey(implementedKeys[0]);
+    }
+  }, [implementedKeys, historyKey]);
+
+  useEffect(() => {
+    if (hasRange && implementedKeys.length > 0) {
+      const firstRecomputable = implementedKeys.find((key) => RECOMPUTABLE_WINDOW_KEYS.has(key));
+      if (firstRecomputable && (!historyKey || !RECOMPUTABLE_WINDOW_KEYS.has(historyKey))) {
+        setHistoryKey(firstRecomputable);
+      }
+    }
+  }, [hasRange, implementedKeys, historyKey]);
+
+  useEffect(() => {
+    setFrom("");
+    setTo("");
+  }, [activeDepartment]);
+
+  const shownRows = historyByKey[historyKey] ?? [];
+  const windowValue = shownRows.length > 0 ? shownRows[shownRows.length - 1] : null;
+  const windowLive = windowLiveByKey[historyKey] ?? null;
+
+  const refreshLive = useCallback(async () => {
+    if (implementedKeys.length === 0) return;
+    setIsUpdating(true);
+    setError(null);
+    try {
+      await fetchScorecardLive(implementedKeys);
+      void loadWindowValues();
+      void loadContexts();
+      void loadHistory();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to refresh.");
+    } finally {
+      setIsUpdating(false);
+    }
+  }, [implementedKeys, loadContexts, loadHistory, loadWindowValues]);
+
+  const implementedCount = implemented.length;
+
+  return (
+    <AdminPageFrame>
+      <PageMeta title="Score Cards | بطاقات الأداء" description="بطاقات الأداء عبر كل الأقسام" />
+      <AdminPageHero
+        eyebrow="Score Cards"
+        title="بطاقات الأداء"
+        description="قيمة كل سكور كارد بتتسجل كل ٣٠ دقيقة من Odoo من غير ضغط على السيرفر، والكارت بيقارن الحالية بالرقم اللي اتثبت يوم السبت — أخضر لما يكون الفرق في الاتجاه الصح حسب محتوى الكارت (بالنسبة لـ Total Payable النزول أخضر)، أحمر للعكس. الفلتر من/إلى يقرأ الـ snapshots، وبالنسبة للكروت القابلة لإعادة الحساب (ملغي الفواتير، تأخير الفوترة، خط المصاريف) بيحسب القيمة مباشرة من Odoo للفترة."
+        meta={
+          <>
+            <AdminHeroPill tone="emerald">{implementedCount} مفعّل</AdminHeroPill>
+            <AdminHeroPill tone="slate">{activeCards.length} إجمالي</AdminHeroPill>
+          </>
+        }
+        actions={
+          <button
+            type="button"
+            onClick={() => void refreshLive()}
+            disabled={isUpdating || implementedKeys.length === 0}
+            className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#1b1b1b] px-4 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
+          >
+            <ArrowPathIcon className={`h-4 w-4 ${isUpdating ? "animate-spin" : ""}`} />
+            تحديث
+          </button>
+        }
+      />
+
+      {error ? (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-800">
+        {DEPARTMENT_ORDER.map((department) => (
+          <TabButton
+            key={department}
+            active={activeDepartment === department}
+            label={department}
+            labelAr={DEPARTMENT_LABELS[department] ?? department}
+            count={getScorecardsByDepartment(department).length}
+            onClick={() => setActiveDepartment(department)}
+          />
+        ))}
+      </div>
+
+
+      {activeDepartment === "Customer Service" ? (
+        <CustomerServiceAnalytics />
+      ) : (
+        <div className="contents">
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex min-w-[180px] flex-col gap-1">
+            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">من تاريخ</span>
+            <input
+              type="date"
+              value={from}
+              onChange={(event) => setFrom(event.target.value)}
+              className="h-10 rounded-xl border border-gray-300 bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+            />
+          </label>
+          <label className="flex min-w-[180px] flex-col gap-1">
+            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">إلى تاريخ</span>
+            <input
+              type="date"
+              min={from || undefined}
+              value={to}
+              onChange={(event) => setTo(event.target.value)}
+              className="h-10 rounded-xl border border-gray-300 bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+            />
+          </label>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 inline-flex items-center gap-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
+              <CalendarDaysIcon className="h-4 w-4" /> سريع:
+            </span>
+            {QUICK_RANGES.map(({ key, label }) => {
+              const range = rangeForQuick(key);
+              const active = range.from === from && range.to === to;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => {
+                    setFrom(range.from);
+                    setTo(range.to);
+                  }}
+                  className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                    active
+                      ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/15"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="ml-auto flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+            {shownRows.length > 0 ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-25 px-3 py-1 text-xs font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300">
+                <ClockIcon className="h-3.5 w-3.5" />
+                {shownRows.length} snapshot{shownRows.length === 1 ? "" : "s"} في الفترة
+              </span>
+            ) : hasRange && windowLive ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20">
+                <SparklesIcon className="h-3.5 w-3.5" />
+                محسوبة مباشرة من Odoo
+              </span>
+            ) : hasRange ? (
+              <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/20">
+                {RECOMPUTABLE_WINDOW_KEYS.has(historyKey) ? "تعذّر حساب الفترة من Odoo" : "لا توجد بيانات لهذا الكارت اللحظي"}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <AdminSection
+        title={DEPARTMENT_LABELS[activeDepartment] ?? activeDepartment}
+        description={`${activeCards.length} scorecards · ${implementedCount} implemented · ${hasRange ? "الفترة: " + (from || "بداية") + " → " + (to || "نهاية") : "كل الفترات"}`}
+      >
+        <AdminMetricGrid>
+          {activeCards.map((def) => {
+            const context = def.implemented ? (ctxByKey[def.key] ?? { latest: null, saturdays: [] }) : null;
+            return def.implemented ? (
+              <ImplementedCard
+                key={def.key}
+                def={def}
+                latest={context?.latest}
+                saturdays={context?.saturdays ?? []}
+                isUpdating={isUpdating}
+                windowValue={hasRange ? (windowLiveByKey[def.key] ?? null) : null}
+                showPointInTimeNote={hasRange && !RECOMPUTABLE_WINDOW_KEYS.has(def.key)}
+              />
+            ) : STATIC_SCORECARD_VALUES[def.key] ? (
+              <StaticCard key={def.key} def={def} />
+            ) : (
+              <PendingCard key={def.key} def={def} />
+            );
+          })}
+        </AdminMetricGrid>
+      </AdminSection>
+
+      {implemented.length > 0 && historyKey && (shownRows.length > 0 || windowLive || hasRange) ? (
+        <AdminSection
+          title={`سجل الفترة — ${implemented.find((s) => s.key === historyKey)?.scorecard ?? ""}`}
+          description={windowLive ? "القيمة محسوبة مباشرة من Odoo للفترة المختارة، مع أي snapshots متاحة في المدى." : shownRows.length > 0 ? "جدول الـ snapshots في الفترة المختارة، والقيمة الأخيرة فوق." : "الكارت ده لحظي ميتحسبش بتاريخ قديم — اختر من الكروت القابلة للحساب (Cancelled / Invoicing / Expenses) لعرض الفترة."}
+          actions={
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <select
+                value={historyKey}
+                onChange={(event) => setHistoryKey(event.target.value)}
+                className="h-9 rounded-lg border border-gray-300 bg-white px-2.5 text-sm font-medium text-gray-700 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              >
+                {implemented.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.scorecard}
+                  </option>
+                ))}
+              </select>
+              <span className="inline-flex items-center rounded-lg bg-brand-25 px-3 py-1.5 text-sm font-semibold text-gray-600 dark:bg-white/10 dark:text-gray-300">
+                {formatScorecardValue((windowLive ?? windowValue)?.value ?? null, (windowLive ?? windowValue)?.currency ?? "EGP")}
+              </span>
+            </div>
+          }
+        >
+          {windowLive ? (
+            <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/[0.07]">
+              <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+                قيمة الفترة (من Odoo مباشرة): {formatScorecardValue(windowLive.value, windowLive.currency ?? "EGP")}
+                <span className="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
+                  {from || "البداية"} → {to || "النهاية"}
+                </span>
+              </p>
+              {windowLive.note ? (
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{windowLive.note}</p>
+              ) : null}
+            </div>
+          ) : null}
+          {shownRows.length > 0 ? (<div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-xs uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:text-gray-400">
+                  <th className="py-2 pr-4 font-semibold">الوقت</th>
+                  <th className="py-2 pr-4 font-semibold">القيمة</th>
+                  <th className="py-2 pr-4 font-semibold">نسبة التغير</th>
+                  <th className="py-2 font-semibold">ملاحظة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shownRows.map((row, index) => {
+                  const prev = index > 0 ? shownRows[index - 1].value : null;
+                  const rowValue = row.value;
+                  const pct =
+                    prev !== null && Number.isFinite(prev) && prev !== 0 && rowValue !== null && Number.isFinite(rowValue)
+                      ? (((rowValue - prev) / Math.abs(prev)) * 100).toFixed(2)
+                      : null;
+                  return (
+                    <tr key={`${row.created_at}-${index}`} className="border-b border-gray-100 last:border-0 dark:border-gray-800/60">
+                      <td className="py-2 pr-4 tabular-nums text-gray-500 dark:text-gray-400">
+                        {row.created_at?.slice(5, 16).replace("T", " ")}
+                      </td>
+                      <td className="py-2 pr-4 font-medium tabular-nums text-gray-900 dark:text-white">
+                        {formatScorecardValue(rowValue, row.currency ?? "EGP")}
+                      </td>
+                      <td className="py-2 pr-4 tabular-nums text-gray-500 dark:text-gray-400">
+                        {pct !== null ? `${pct}%` : "—"}
+                      </td>
+                      <td className="py-2 text-xs text-gray-500 dark:text-gray-400">{row.note ?? "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>) : null}
+        </AdminSection>
+      ) : null}
+        </div>
+      )}
+    </AdminPageFrame>
+  );
+}

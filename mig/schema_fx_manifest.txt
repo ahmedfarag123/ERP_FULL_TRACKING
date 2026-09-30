@@ -186,3 +186,12 @@
 00185	FUNCTION public.update_logistics_route_settlements_updated_at()
 00186	FUNCTION public.upsert_odoo_kpi_values(p_values jsonb, p_period_start date, p_period_end date)
 00187	FUNCTION public.visits_set_user_uid()
+00188.sql
+00189	FUNCTION public.otif_analytics(timestamptz, timestamptz, text, text, text, text, text, int, int, text)
+00190	FUNCTION public.otif_analytics(timestamptz, timestamptz, text, text, text, text, text, int, int, text) -- fix driver + salesperson sources, governorate regex, co-driver filter, filter_options
+00191	FUNCTION public.logistics_shipment_detail(uuid) -- full order price, per-line prices, returns value, collection 3 states, driver chain, salesperson
+00192	FUNCTION public.logistics_shipment_detail(uuid) -- correct returns: clamp to requested-delivered shortfall, net=delivered, add phantom/unfulfilled
+00193	FUNCTION public.driver_update_shipment_phase(uuid,text,text,numeric,numeric,text,jsonb,text) + 2 overloads, FUNCTION public.driver_report_delivery_failure(uuid,text,text,text,jsonb,text,numeric,numeric), DATA -- drop plan-level approved copy, clamp effective_approved to requested, guard all-zero done_quantity, backfill approved/returned + done from Odoo + return total_gmv
+00194 | 2026-09-27T08:24:35Z | make the return record authoritative: return amount = LEAST(return requested, loaded) for driver_partial_delivery rows and LEAST(recorded, requested) for delivery_failed_* rows; delivered = GREATEST(LEAST(done, requested - returned),0); recompute delivered_invoice_amount and return-shipment GMV; logistics_shipment_detail reports net delivered
+00195 | 2026-09-27T14:35:58Z | FUNCTION public.driver_submit_order_collections(uuid,jsonb,text,text,uuid) -- collection writes now understand every method: collected_amount = cash+cheque+bank_transfer, collected_successfully_amount populated, payment_method no longer collapsed to credit, collector/rep/timestamps recorded, delivered_invoice_amount written NET of returns; DATA -- backfill order+shipment collections from payment legs and collection_submitted events, fill sales rep/collector/timestamps, recompute invoice net of returns
+00196 | 2026-09-27T14:44:12Z | FUNCTION public.logistics_shipment_detail(uuid) -- expose the shipment timeline (events incl. collection_submitted, with actor names), expose collection-check driver name/created_at, and compute outstanding_amount as (pending_delivery_amount - collected_successfully_amount) instead of reporting the collection total as still owed

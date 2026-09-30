@@ -48,6 +48,25 @@ function mapDeliveryPhase(state) {
       return "pending";
   }
 }
+const TERMINAL_SYNC_PHASES = new Set(["delivered", "cancelled"]);
+const INITIAL_SYNC_PHASES = new Set(["", "pending", "ready", "assigned"]);
+function resolveSyncDeliveryPhase(mappedPhase, existingPhase, assignedToDriver) {
+  const currentPhase = String(existingPhase ?? "").trim().toLowerCase();
+  const driverAdvanced = currentPhase !== "" && !INITIAL_SYNC_PHASES.has(currentPhase);
+  if (driverAdvanced) {
+    return currentPhase;
+  }
+  if (assignedToDriver && currentPhase) {
+    return currentPhase;
+  }
+  if (!TERMINAL_SYNC_PHASES.has(mappedPhase)) {
+    return mappedPhase;
+  }
+  if (currentPhase && currentPhase !== mappedPhase) {
+    return currentPhase;
+  }
+  return currentPhase || mappedPhase;
+}
 async function fetchRowsByExternalIds(tableName, selectColumns, columnName, ids) {
   const rows = [];
   const chunkSize = 75;
@@ -233,6 +252,15 @@ Deno.serve(async (req)=>{
         user.external_user_id,
         user
       ]));
+    const existingShipments = await fetchRowsByExternalIds("logistics_shipments", "id, external_shipment_id, delivery_phase, assigned_profile_id", "external_shipment_id", moveShipmentIds);
+    const existingPhaseByExternalId = new Map(existingShipments.map((row)=>[
+        String(row.external_shipment_id),
+        row.delivery_phase
+      ]));
+    const existingAssignedProfileByExternalId = new Map(existingShipments.map((row)=>[
+        String(row.external_shipment_id),
+        row.assigned_profile_id
+      ]));
     const syncTime = new Date().toISOString();
     const shipmentUpsertData = shipments.map((shipment)=>{
       const externalCustomerId = referenceId(shipment.partner_id);
@@ -260,7 +288,7 @@ Deno.serve(async (req)=>{
         external_warehouse_id: warehouse?.external_warehouse_id ?? null,
         warehouse_name: warehouse?.warehouse_name ?? null,
         logistics_user_id: logisticsUser?.id ?? null,
-        assigned_profile_id: logisticsUser?.linked_profile_id ?? null,
+        assigned_profile_id: logisticsUser?.linked_profile_id ?? existingAssignedProfileByExternalId.get(String(shipment.id)) ?? null,
         external_user_id: externalUserId,
         assigned_user_name: logisticsUser?.employee_name ?? referenceName(shipment.user_id),
         assigned_job_title: logisticsUser?.job_title ?? null,
@@ -269,7 +297,7 @@ Deno.serve(async (req)=>{
         source_location_ref: referenceName(shipment.location_id),
         destination_location_ref: referenceName(shipment.location_dest_id),
         shipment_state: String(shipment.state ?? "").trim() || "draft",
-        delivery_phase: mapDeliveryPhase(shipment.state),
+        delivery_phase: resolveSyncDeliveryPhase(mapDeliveryPhase(shipment.state), existingPhaseByExternalId.get(String(shipment.id)), Boolean(existingAssignedProfileByExternalId.get(String(shipment.id)))),
         priority: String(shipment.priority ?? "").trim() || null,
         move_type: String(shipment.move_type ?? "").trim() || null,
         scheduled_at: toNullableIso(order?.commitment_date ?? shipment.scheduled_date),

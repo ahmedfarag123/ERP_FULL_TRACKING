@@ -73,7 +73,7 @@ export default function EndOfRouteModal({
         }
         setCameraReady(true);
       } catch (error) {
-        setCameraError(error instanceof Error ? error.message : 'تعذر فتح الكاميرا');
+        setCameraError('تعذر تشغيل الكاميرا. افتح التطبيق من الرابط الرسمي https://horecasmartos.duckdns.org/driver على HTTPS، أو اسمح للكاميرا من إعدادات الموقع، أو ارفع صورة من الملفات.');
       }
     };
 

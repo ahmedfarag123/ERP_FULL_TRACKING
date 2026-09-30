@@ -187,6 +187,7 @@ Deno.serve(async (req) => {
       name: productName || original_name || `Product ${new_code}`,
       default_code: new_code || undefined,
       list_price: Number(sale_price) || 0,
+      standard_price: Number(cost) || 0,
       active: is_active !== false,
     };
 

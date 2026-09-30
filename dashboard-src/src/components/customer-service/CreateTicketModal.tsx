@@ -25,7 +25,7 @@ import {
 const INPUT_CLASS =
   "w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 shadow-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100";
 
-const DEPARTMENT_OPTIONS = [
+export const DEPARTMENT_OPTIONS = [
   "الأدارة",
   "المخزن",
   "الحركة",
@@ -50,13 +50,13 @@ interface OrderOption {
   delivery_status: string | null;
 }
 
-interface UserOption {
+export interface UserOption {
   id: string;
   full_name: string;
   email: string;
 }
 
-interface TicketItemDraft {
+export interface TicketItemDraft {
   orderLineItemId: string;
   productName: string;
   productCode: string | null;
@@ -590,7 +590,7 @@ export default function CreateTicketModal({
 
 /* ─── Assignment Section (shared) ────────────────────────────────────────── */
 
-function AssignmentSection({
+export function AssignmentSection({
   selectedDepartments,
   setSelectedDepartments,
   selectedUserIds,
@@ -716,7 +716,7 @@ function AssignmentSection({
 
 /* ─── Product Item Card ──────────────────────────────────────────────────── */
 
-function ProductItemCard({
+export function ProductItemCard({
   item,
   users,
   onUpdate,

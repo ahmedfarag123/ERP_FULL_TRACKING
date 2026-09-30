@@ -20,11 +20,13 @@ import {
 } from '@/services/collectionHandover';
 import { uploadDeliveryProof } from '@/services/shipmentData';
 import { supabase } from '@/lib/supabase';
+import CollectionSheet from '@/components/CollectionSheet';
 import type {
   PlanCollectionCheck,
   CollectionCheckStatus,
   CollectionPaymentMethod,
   Shipment,
+  ShipmentOrder,
 } from '@/types';
 
 interface SalesRep {
@@ -59,6 +61,11 @@ export default function CollectionScreen() {
 
   // Modal state
   const [modalShipment, setModalShipment] = useState<Shipment | null>(null);
+
+  // Unified collection sheet
+  const [sheetShipmentId, setSheetShipmentId] = useState<string | null>(null);
+  const [sheetOrders, setSheetOrders] = useState<ShipmentOrder[]>([]);
+  const [showSheet, setShowSheet] = useState(false);
   const [modalType, setModalType] = useState<'collected' | 'not_collected' | null>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<CollectionPaymentMethod | null>(null);
   const [selectedReason, setSelectedReason] = useState<string>('');
@@ -122,7 +129,7 @@ export default function CollectionScreen() {
         }
         setCameraReady(true);
       } catch (error) {
-        setCameraError(error instanceof Error ? error.message : 'تعذر فتح الكاميرا');
+        setCameraError('تعذر تشغيل الكاميرا. افتح التطبيق من الرابط الرسمي https://horecasmartos.duckdns.org/driver على HTTPS، أو اسمح للكاميرا من إعدادات الموقع، أو ارفع صورة من الملفات.');
       }
     };
 
@@ -187,21 +194,15 @@ export default function CollectionScreen() {
   }, [planStats]);
 
   const openCollectedModal = (shipment: Shipment) => {
-    setModalShipment(shipment);
-    setModalType('collected');
-    setSelectedPaymentMethod(null);
-    setSelectedSalesRepId('');
-    setDriverNotes('');
-    resetProofImage();
+    setSheetShipmentId(shipment.id);
+    setSheetOrders(shipment.orders ?? []);
+    setShowSheet(true);
   };
 
   const openNotCollectedModal = (shipment: Shipment) => {
-    setModalShipment(shipment);
-    setModalType('not_collected');
-    setSelectedReason('');
-    setCustomReason('');
-    setDriverNotes('');
-    resetProofImage();
+    setSheetShipmentId(shipment.id);
+    setSheetOrders(shipment.orders ?? []);
+    setShowSheet(true);
   };
 
   const resetProofImage = () => {
@@ -761,6 +762,24 @@ export default function CollectionScreen() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Unified Collection Sheet */}
+      {sheetShipmentId && (
+        <CollectionSheet
+          isOpen={showSheet}
+          onClose={() => {
+            setShowSheet(false);
+            setSheetShipmentId(null);
+            setSheetOrders([]);
+          }}
+          shipmentId={sheetShipmentId}
+          orders={sheetOrders}
+          onComplete={() => {
+            void loadChecks();
+            loadShipments();
+          }}
+        />
+      )}
     </div>
   );
 }

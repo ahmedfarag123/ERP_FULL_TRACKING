@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AdminSection } from "./AdminPageElements";
 import { supabase } from "../../lib/supabase";
 import TripAnalyticsPanel from "./TripAnalyticsPanel";
 import AdminLiveTrackingMap, {
   type MapDriverLocation,
   type MapPlanRoute,
+  type MapPlanAssignee,
   type MapPrimaryWarehouse,
   type MapShipmentStop,
   type MapDriverTrack,
@@ -167,6 +168,35 @@ async function fetchLiveMapData() {
   }
 
   const planIds = (plans ?? []).map((p) => p.id);
+
+  const planAssigneeMap = new Map<string, MapPlanAssignee[]>();
+  if (planIds.length > 0) {
+    const { data: assigneeRows } = await supabase
+      .from("logistics_plan_assignees")
+      .select("plan_id, profile_id, display_name")
+      .in("plan_id", planIds);
+    const assigneeProfileIds = [...new Set((assigneeRows ?? []).map((a: any) => String(a.profile_id)).filter(Boolean))];
+    const assigneeNameMap = new Map<string, string>();
+    if (assigneeProfileIds.length > 0) {
+      const { data: assigneeProfiles } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", assigneeProfileIds);
+      for (const p of (assigneeProfiles ?? []) as any[]) {
+        if (p.full_name) assigneeNameMap.set(String(p.id), String(p.full_name));
+      }
+    }
+    for (const row of (assigneeRows ?? []) as any[]) {
+      const pid = String(row.plan_id);
+      const list = planAssigneeMap.get(pid) ?? [];
+      list.push({
+        profileId: String(row.profile_id),
+        displayName: row.display_name || assigneeNameMap.get(String(row.profile_id)) || "سائق مشارك",
+      });
+      planAssigneeMap.set(pid, list);
+    }
+  }
+
   const shipmentsByPlan = new Map<string, MapShipmentStop[]>();
   const warehouseByPlan = new Map<string, string>();
   const warehouseCoordByPlan = new Map<string, { latitude: number; longitude: number }>();
@@ -236,6 +266,25 @@ async function fetchLiveMapData() {
     }
   }
 
+  for (const [, assignees] of planAssigneeMap) {
+    for (const a of assignees) {
+      if (drivers.some((d) => d.driverId === a.profileId)) continue;
+      const live = liveDriverMap.get(a.profileId);
+      if (live && live.latitude !== 0) {
+        drivers.push(live);
+      } else {
+        drivers.push({
+          driverId: a.profileId,
+          driverName: a.displayName,
+          latitude: 0,
+          longitude: 0,
+          updatedAt: "",
+          completedToday: false,
+        });
+      }
+    }
+  }
+
   const trackDriverIds = [...new Set([...planDriverIds, ...liveDriverMap.keys()])];
   const tracks: MapDriverTrack[] = [];
   if (trackDriverIds.length > 0) {
@@ -271,6 +320,12 @@ async function fetchLiveMapData() {
     if (stops.length === 0) continue;
     const driver = liveDriverMap.get(plan.assigned_profile_id ?? "");
     const warehouseCoord = warehouseCoordByPlan.get(plan.id) ?? HORECA_MARG_WAREHOUSE;
+    const assignees = (planAssigneeMap.get(plan.id) ?? []).map((a) => ({
+      ...a,
+      latitude: liveDriverMap.get(a.profileId)?.latitude,
+      longitude: liveDriverMap.get(a.profileId)?.longitude,
+      updatedAt: liveDriverMap.get(a.profileId)?.updatedAt,
+    }));
 
     planRoutes.push({
       planId: plan.id,
@@ -284,6 +339,7 @@ async function fetchLiveMapData() {
       driverLatitude: driver && driver.latitude !== 0 ? driver.latitude : undefined,
       driverLongitude: driver && driver.longitude !== 0 ? driver.longitude : undefined,
       stops,
+      assignees,
     });
   }
 
@@ -301,7 +357,17 @@ export default function LiveTrackingMapSection({
   });
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!selectedDriverId && data?.drivers?.length) {
+      setSelectedDriverId(data.drivers[0].driverId);
+    }
+  }, [selectedDriverId, data?.drivers]);
+
   const selectedDriver = (data?.drivers ?? []).find((d) => d.driverId === selectedDriverId);
+
+  const selectedPlanAssignees = (data?.planRoutes ?? [])
+    .filter((p) => p.driverId === selectedDriverId)
+    .flatMap((p) => p.assignees ?? []);
 
   return (
     <div className="space-y-6">
@@ -323,7 +389,11 @@ export default function LiveTrackingMapSection({
         )}
       </AdminSection>
 
-      <TripAnalyticsPanel driverId={selectedDriverId} driverName={selectedDriver?.driverName} />
+      <TripAnalyticsPanel
+        driverId={selectedDriverId}
+        driverName={selectedDriver?.driverName}
+        assignees={selectedPlanAssignees}
+      />
     </div>
   );
 }

@@ -9,15 +9,37 @@ import {
   AdminSection,
   TabButton,
 } from "../../../components/admin/AdminPageElements";
-import { DEPARTMENT_ORDER, DEPARTMENT_LABELS, getScorecardsByDepartment, isGoodDelta, type ScorecardDef } from "../../../data/scorecards";
+import { DEPARTMENT_ORDER, DEPARTMENT_LABELS, getScorecardsByDepartment, isGoodDelta, STATIC_SCORECARD_VALUES, type ScorecardDef } from "../../../data/scorecards";
 import {
   fetchSaturdayContext,
   fetchScorecardHistory,
   fetchScorecardLive,
+  fetchScorecardWindowByKey,
   formatScorecardValue,
+  previousWindowFor,
   type SaturdayContext,
   type ScorecardValue,
 } from "../../../lib/scorecards";
+import CustomerServiceAnalytics from "../CustomerServiceAnalytics";
+
+function formatScorecardSmart(value: number, currency: string | null): string {
+  const isPercent = value > -100 && value < 200 && String(currency ?? "").toLowerCase().includes("%");
+  if (isPercent) return `${value.toFixed(2)}%`;
+  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value)} ${String(currency ?? "").toUpperCase()}`.trim();
+}
+
+function formatScorecardWithAverage(value: number | null, currency: string | null, average: number | null | undefined, averageSuffix?: unknown, averageNoParen?: unknown): string {
+  const hasAvg = average !== null && average !== undefined && Number.isFinite(average);
+  if (!hasAvg) return formatScorecardValue(value, currency);
+  const base = value === null || value === undefined || !Number.isFinite(value) ? "\u2014" : formatScorecardSmart(value, currency);
+  const suffix = typeof averageSuffix === "string" ? averageSuffix : "";
+  const inner = `${formatScorecardSmart(average as number, null)}${suffix}`;
+  return averageNoParen === true ? `${base} ${inner}` : `${base} (${inner})`;
+}
+
+
+
+
 
 type QuickRange = "all" | "today" | "yesterday" | "7d" | "30d" | "prev-month";
 
@@ -36,6 +58,25 @@ const RECOMPUTABLE_WINDOW_KEYS = new Set([
   "sales.horeca_average_order",
   "sales.products_sold_horeca",
   "sales.crm_activities",
+  "sales.new_customers",
+  "sales.retention_rate",
+  "sales.sales_by_app",
+  "sales.active_customers",
+  "purchase.stockout_top100",
+  "purchase.new_products",
+  "purchase.products_purchased",
+  "purchase.purchase_orders",
+  "purchase.accuracy_of_purchase",
+  "purchase.receipts_date_24h",
+  "purchase.gross_margin_mas",
+  "purchase.gross_margin_horeca",
+  "purchase.variance_of_prices",
+  "logistics.internal_transfers",
+  "logistics.company_transfers",
+  "logistics.returns_count",
+  "logistics.returns_value",
+  "logistics.orders_to_validate",
+  "logistics.validate_over_11am",
 ]);
 
 const QUICK_RANGES: { key: QuickRange; label: string }[] = [
@@ -120,6 +161,8 @@ function ImplementedCard({
   isUpdating,
   windowValue,
   showPointInTimeNote,
+  compare,
+  compareRange,
 }: {
   def: ScorecardDef;
   latest?: ScorecardValue | null;
@@ -127,6 +170,8 @@ function ImplementedCard({
   isUpdating: boolean;
   windowValue?: ScorecardValue | null;
   showPointInTimeNote?: boolean;
+  compare?: { current: ScorecardValue | null; previous: ScorecardValue | null } | null;
+  compareRange?: { from: string; to: string } | null;
 }) {
   const updatedAt = latest?.created_at ? latest.created_at.slice(5, 16).replace("T", " ") : null;
   const vendors = latest?.metadata?.topVendors ?? [];
@@ -136,14 +181,19 @@ function ImplementedCard({
   const prevSaturday = saturdays[1] ?? null;
   const display = windowValue ?? latest;
   const isWindow = Boolean(windowValue);
+  const weekly = (display?.metadata?.weekly ?? []) as { label: string; dayLabel: string; count: number }[];
   const delta =
-    isWindow || !latest || latest.value == null || !lastSaturday || lastSaturday.value == null
-      ? null
-      : latest.value - lastSaturday.value;
+    weekly.length >= 2 && weekly[0]?.count != null && weekly[1]?.count != null
+      ? weekly[0].count - weekly[1].count
+      : !latest || latest.value == null || !lastSaturday || lastSaturday.value == null
+        ? null
+        : latest.value - lastSaturday.value;
   const deltaPct =
-    delta !== null && lastSaturday?.value
-      ? ((delta / Math.abs(lastSaturday.value)) * 100).toFixed(2)
-      : null;
+    delta !== null && weekly.length >= 2 && weekly[0]?.count != null && weekly[1]?.count != null
+      ? ((delta / Math.abs(weekly[1].count)) * 100).toFixed(2)
+      : delta !== null && lastSaturday?.value
+        ? ((delta / Math.abs(lastSaturday.value)) * 100).toFixed(2)
+        : null;
   const neutral = delta === null;
   const good = isGoodDelta(def, delta);
   const isGood = good === true;
@@ -166,7 +216,7 @@ function ImplementedCard({
           <div className={`mt-3 text-3xl font-semibold tracking-tight text-gray-900 dark:text-white ${isUpdating ? "animate-pulse" : ""}`}>
             {latest === undefined
               ? "…"
-              : formatScorecardValue(display?.value ?? null, display?.currency ?? "EGP")}
+              : formatScorecardWithAverage(display?.value ?? null, display?.currency ?? "EGP", display?.metadata?.average ?? null, display?.metadata?.averageSuffix ?? null, display?.metadata?.averageNoParen ?? null)}
           </div>
           {customerCount !== null ? (
             <p className="mt-1.5 text-sm font-semibold text-gray-600 dark:text-gray-300">
@@ -211,6 +261,97 @@ function ImplementedCard({
           </div>
         </div>
       </div>
+
+      {compare && compare.current && compareRange ? (() => {
+        const curVal = compare.current.value;
+        const prevVal = compare.previous?.value ?? null;
+        const compareDelta = curVal !== null && prevVal !== null && prevVal !== 0
+          ? curVal - prevVal
+          : null;
+        const compareDeltaPct = compareDelta !== null && prevVal !== null
+          ? ((compareDelta / Math.abs(prevVal)) * 100).toFixed(1)
+          : null;
+        const compareGood = isGoodDelta(def, compareDelta);
+        const isCompareGood = compareGood === true;
+        const compareChipClass = compareGood === null
+          ? "bg-gray-50 text-gray-600 ring-gray-200 dark:bg-white/10 dark:text-gray-300 dark:ring-white/15"
+          : isCompareGood
+            ? "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20"
+            : "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-500/20";
+        return (
+          <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-700 dark:bg-white/[0.02]">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.15em] text-gray-400 dark:text-gray-500">
+              المقارنة بين الفترتين
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg bg-white p-2.5 dark:bg-white/[0.04]">
+                <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400">الفترة المختارة</p>
+                <p className="mt-0.5 text-[10px] text-gray-400 dark:text-gray-500">{compareRange.from} → {compareRange.to}</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums text-gray-900 dark:text-white">
+                  {formatScorecardValue(curVal, compare.current.currency ?? "EGP")}
+                </p>
+              </div>
+              <div className="rounded-lg bg-white p-2.5 dark:bg-white/[0.04]">
+                <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400">الفترة السابقة</p>
+                <p className="mt-0.5 text-[10px] text-gray-400 dark:text-gray-500">
+                  {compare.previous?.created_at?.slice(0, 10) ?? "—"}
+                </p>
+                <p className="mt-1 text-lg font-semibold tabular-nums text-gray-400 dark:text-gray-500">
+                  {formatScorecardValue(prevVal, compare.previous?.currency ?? "EGP")}
+                </p>
+              </div>
+            </div>
+            {compareDelta !== null ? (
+              <div className="mt-2 flex items-center justify-center">
+                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ${compareChipClass}`}>
+                  {compareDelta >= 0 ? "Δ +" : "Δ −"}{compareDeltaPct}%
+                  <span className="ml-1 text-[10px] font-normal opacity-70">
+                    {isCompareGood ? "إيجابي" : "سلبي"}
+                  </span>
+                </span>
+              </div>
+            ) : (
+              <p className="mt-2 text-center text-[11px] text-gray-400 dark:text-gray-500">
+                لا توجد بيانات كافية للمقارنة
+              </p>
+            )}
+          </div>
+        );
+      })() : null}
+
+      {weekly.length > 1 ? (
+        <div className="mt-4 space-y-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-gray-400 dark:text-gray-500">
+            الأسابيع السابقة (خميس → أربعاء)
+          </p>
+          {weekly.slice(1).map((week, index) => {
+            const prev = weekly[index + 2];
+            const deltaChip = prev
+              ? week.count > prev.count
+                ? "text-rose-600 dark:text-rose-400"
+                : week.count < prev.count
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-gray-400 dark:text-gray-500"
+              : "";
+            return (
+              <div key={week.label} className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                  {index === 0 ? "الأسبوع اللي فات · " : "اللي قبله · "}
+                  {week.dayLabel}
+                </span>
+                <span className="font-semibold tabular-nums text-gray-900 dark:text-white">
+                  {week.count}
+                  {prev ? (
+                    <span className={`ml-1.5 text-[11px] font-medium ${deltaChip}`}>
+                      ({week.count - prev.count >= 0 ? "+" : ""}{week.count - prev.count})
+                    </span>
+                  ) : null}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       {saturdays.length > 0 ? (
         <div className="mt-4 space-y-1.5">
@@ -288,6 +429,69 @@ function PendingCard({ def }: { def: ScorecardDef }) {
   );
 }
 
+function StaticCard({ def }: { def: ScorecardDef }) {
+  const value = STATIC_SCORECARD_VALUES[def.key];
+  if (!value) return <PendingCard def={def} />;
+  const delta =
+    Number.isFinite(value.current) && Number.isFinite(value.previous) && value.current !== value.previous
+      ? value.current - value.previous
+      : null;
+  const deltaPct =
+    delta !== null && Number.isFinite(value.previous) && value.previous !== 0
+      ? (Math.abs(delta) / Math.abs(value.previous)) * 100
+      : null;
+  const good = delta !== null ? isGoodDelta({ goodWhen: value.goodWhen ?? "higher" }, delta) : null;
+  const isGood = good === true;
+  const frameClass =
+    good === null
+      ? "border-emerald-200 bg-white dark:border-emerald-500/30 dark:bg-white/[0.04]"
+      : isGood
+        ? "border-emerald-300 bg-emerald-50/50 dark:border-emerald-500/40 dark:bg-emerald-500/[0.07]"
+        : "border-rose-300 bg-rose-50/50 dark:border-rose-500/40 dark:bg-rose-500/[0.07]";
+  const deltaChipClass =
+    good === null
+      ? "bg-gray-50 text-gray-600 ring-gray-200 dark:bg-white/10 dark:text-gray-300 dark:ring-white/15"
+      : isGood
+        ? "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20"
+        : "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-500/20";
+  return (
+    <article className={`rounded-2xl border p-5 md:p-6 ${frameClass}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+            {def.scorecard}
+          </p>
+          <div className="mt-3 text-3xl font-semibold tracking-tight text-gray-900 dark:text-white">
+            {value.value}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-25 px-2.5 py-0.5 text-[11px] font-medium text-gray-600 ring-1 ring-brand-200 dark:bg-white/10 dark:text-gray-300 dark:ring-white/20">
+              <SparklesIcon className="h-3.5 w-3.5" /> أسبوعي من التقرير
+            </span>
+            {delta !== null ? (
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ${deltaChipClass}`}>
+                {delta >= 0 ? "Δ +" : "Δ −"}
+                {deltaPct !== null ? `${deltaPct.toFixed(0)}%` : ""}
+              </span>
+            ) : (
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ${deltaChipClass}`}>
+                Δ 0%
+              </span>
+            )}
+            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ${deltaChipClass}`}>
+              <CheckCircleIcon className="h-3.5 w-3.5" /> {isGood ? "إيجابي" : good === null ? "محايد" : "سلبي"}
+            </span>
+          </div>
+        </div>
+      </div>
+      <p className="mt-4 text-xs font-medium text-gray-500 dark:text-gray-400">
+        Last Week: <span className="font-semibold tabular-nums text-gray-700 dark:text-gray-300">{value.lastWeek}</span>
+      </p>
+      <ScorecardMeta def={def} />
+    </article>
+  );
+}
+
 export default function ScoreCardsPage() {
   const [activeDepartment, setActiveDepartment] = useState<string>(DEPARTMENT_ORDER[0]);
   const [ctxByKey, setCtxByKey] = useState<Record<string, SaturdayContext>>({});
@@ -298,6 +502,10 @@ export default function ScoreCardsPage() {
   const [to, setTo] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [compareEnabled, setCompareEnabled] = useState(true);
+  const [snapWindowCurrentByKey, setSnapWindowCurrentByKey] = useState<Record<string, ScorecardValue>>({});
+  const [snapWindowPrevByKey, setSnapWindowPrevByKey] = useState<Record<string, ScorecardValue>>({});
+  const [windowLivePrevByKey, setWindowLivePrevByKey] = useState<Record<string, ScorecardValue | null>>({});
 
   const activeCards = getScorecardsByDepartment(activeDepartment);
   const implemented = activeCards.filter((s) => s.implemented);
@@ -311,6 +519,21 @@ export default function ScoreCardsPage() {
   const contextSeq = useRef(0);
   const historySeq = useRef(0);
   const hasRange = Boolean(from || to);
+
+  const prevWindow = useMemo(() => {
+    if (!from || !to) return null;
+    return previousWindowFor(from, to);
+  }, [from, to]);
+
+  const nonRecKeys = useMemo(
+    () => implementedKeys.filter((key) => !RECOMPUTABLE_WINDOW_KEYS.has(key)),
+    [implementedKeys],
+  );
+
+  const recKeys = useMemo(
+    () => implementedKeys.filter((key) => RECOMPUTABLE_WINDOW_KEYS.has(key)),
+    [implementedKeys],
+  );
 
   const loadContexts = useCallback(async () => {
     const seq = ++contextSeq.current;
@@ -378,6 +601,42 @@ export default function ScoreCardsPage() {
   useEffect(() => {
     void loadWindowValues();
   }, [loadWindowValues]);
+
+  const compareSeq = useRef(0);
+  const loadCompareData = useCallback(async () => {
+    const seq = ++compareSeq.current;
+    if (!compareEnabled || !hasRange || !prevWindow) {
+      setSnapWindowCurrentByKey({});
+      setSnapWindowPrevByKey({});
+      setWindowLivePrevByKey({});
+      return;
+    }
+    try {
+      const [curSnap, prevSnap] = await Promise.all([
+        fetchScorecardWindowByKey({ keys: nonRecKeys, from, to }),
+        fetchScorecardWindowByKey({ keys: nonRecKeys, from: prevWindow.from, to: prevWindow.to }),
+      ]);
+      if (seq !== compareSeq.current) return;
+      setSnapWindowCurrentByKey(curSnap);
+      setSnapWindowPrevByKey(prevSnap);
+    } catch {
+      if (seq !== compareSeq.current) return;
+      setSnapWindowCurrentByKey({});
+      setSnapWindowPrevByKey({});
+    }
+    try {
+      const { fresh } = await fetchScorecardLive(recKeys, { from: prevWindow.from, to: prevWindow.to });
+      if (seq !== compareSeq.current) return;
+      setWindowLivePrevByKey(fresh);
+    } catch {
+      if (seq !== compareSeq.current) return;
+      setWindowLivePrevByKey({});
+    }
+  }, [compareEnabled, hasRange, prevWindow, from, to, nonRecKeys, recKeys]);
+
+  useEffect(() => {
+    void loadCompareData();
+  }, [loadCompareData]);
 
   useEffect(() => {
     if (implementedKeys.length === 0) {
@@ -479,6 +738,11 @@ export default function ScoreCardsPage() {
         ))}
       </div>
 
+
+      {activeDepartment === "Customer Service" ? (
+        <CustomerServiceAnalytics />
+      ) : (
+        <div className="contents">
       <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex min-w-[180px] flex-col gap-1">
@@ -526,6 +790,27 @@ export default function ScoreCardsPage() {
               );
             })}
           </div>
+          {hasRange && prevWindow ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCompareEnabled((v) => !v)}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  compareEnabled
+                    ? "bg-brand-50 text-brand-700 ring-1 ring-brand-200 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/30"
+                    : "bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-white/10 dark:text-gray-400 dark:hover:bg-white/15"
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${compareEnabled ? "bg-brand-500" : "bg-gray-400"}`} />
+                مقارنة بالفترة السابقة
+              </button>
+              {compareEnabled ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-white/10 dark:text-gray-400">
+                  سابقاً: {prevWindow.from} → {prevWindow.to}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           <div className="ml-auto flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
             {shownRows.length > 0 ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-25 px-3 py-1 text-xs font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300">
@@ -553,6 +838,13 @@ export default function ScoreCardsPage() {
         <AdminMetricGrid>
           {activeCards.map((def) => {
             const context = def.implemented ? (ctxByKey[def.key] ?? { latest: null, saturdays: [] }) : null;
+            const isRec = RECOMPUTABLE_WINDOW_KEYS.has(def.key);
+            const compareData = hasRange && compareEnabled && prevWindow
+              ? {
+                  current: isRec ? (windowLiveByKey[def.key] ?? null) : (snapWindowCurrentByKey[def.key] ?? null),
+                  previous: isRec ? (windowLivePrevByKey[def.key] ?? null) : (snapWindowPrevByKey[def.key] ?? null),
+                }
+              : null;
             return def.implemented ? (
               <ImplementedCard
                 key={def.key}
@@ -561,8 +853,12 @@ export default function ScoreCardsPage() {
                 saturdays={context?.saturdays ?? []}
                 isUpdating={isUpdating}
                 windowValue={hasRange ? (windowLiveByKey[def.key] ?? null) : null}
-                showPointInTimeNote={hasRange && !RECOMPUTABLE_WINDOW_KEYS.has(def.key)}
+                showPointInTimeNote={hasRange && !isRec}
+                compare={compareData}
+                compareRange={prevWindow}
               />
+            ) : STATIC_SCORECARD_VALUES[def.key] ? (
+              <StaticCard key={def.key} def={def} />
             ) : (
               <PendingCard key={def.key} def={def} />
             );
@@ -588,7 +884,7 @@ export default function ScoreCardsPage() {
                 ))}
               </select>
               <span className="inline-flex items-center rounded-lg bg-brand-25 px-3 py-1.5 text-sm font-semibold text-gray-600 dark:bg-white/10 dark:text-gray-300">
-                {formatScorecardValue((windowLive ?? windowValue)?.value ?? null, (windowLive ?? windowValue)?.currency ?? "EGP")}
+                {formatScorecardWithAverage((windowLive ?? windowValue)?.value ?? null, (windowLive ?? windowValue)?.currency ?? "EGP", (windowLive ?? windowValue)?.metadata?.average ?? null, (windowLive ?? windowValue)?.metadata?.averageSuffix ?? null, (windowLive ?? windowValue)?.metadata?.averageNoParen ?? null)}
               </span>
             </div>
           }
@@ -606,6 +902,39 @@ export default function ScoreCardsPage() {
               ) : null}
             </div>
           ) : null}
+          {compareEnabled && prevWindow && historyKey ? (() => {
+            const isRec = RECOMPUTABLE_WINDOW_KEYS.has(historyKey);
+            const curVal = isRec ? (windowLiveByKey[historyKey]?.value ?? null) : (snapWindowCurrentByKey[historyKey]?.value ?? null);
+            const prevVal = isRec ? (windowLivePrevByKey[historyKey]?.value ?? null) : (snapWindowPrevByKey[historyKey]?.value ?? null);
+            const histDelta = curVal !== null && prevVal !== null ? curVal - prevVal : null;
+            const histDeltaPct = histDelta !== null && prevVal !== null && prevVal !== 0 ? ((histDelta / Math.abs(prevVal)) * 100).toFixed(1) : null;
+            return (
+              <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-white/[0.02]">
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="flex-1 min-w-[140px]">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">الفترة المختارة</p>
+                    <p className="mt-0.5 text-[11px] text-gray-400">{from} → {to}</p>
+                    <p className="mt-1 text-xl font-semibold tabular-nums text-gray-900 dark:text-white">
+                      {formatScorecardValue(curVal, windowLiveByKey[historyKey]?.currency ?? "EGP")}
+                    </p>
+                  </div>
+                  <div className="text-gray-300 dark:text-gray-600">←</div>
+                  <div className="flex-1 min-w-[140px]">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">الفترة السابقة</p>
+                    <p className="mt-0.5 text-[11px] text-gray-400">{prevWindow.from} → {prevWindow.to}</p>
+                    <p className="mt-1 text-xl font-semibold tabular-nums text-gray-400 dark:text-gray-500">
+                      {formatScorecardValue(prevVal, windowLivePrevByKey[historyKey]?.currency ?? "EGP")}
+                    </p>
+                  </div>
+                  {histDelta !== null ? (
+                    <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20">
+                      {histDelta >= 0 ? "↑" : "↓"} {histDeltaPct}%
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })() : null}
           {shownRows.length > 0 ? (<div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
@@ -644,6 +973,8 @@ export default function ScoreCardsPage() {
           </div>) : null}
         </AdminSection>
       ) : null}
+        </div>
+      )}
     </AdminPageFrame>
   );
 }

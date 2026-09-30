@@ -15,10 +15,14 @@ export interface ScorecardValue {
     customerCount?: number | null;
     invoiceCount?: number | null;
     orderCount?: number | null;
+    average?: number | null;
+    averageSuffix?: string;
+    averageNoParen?: boolean;
     distinctProducts?: number | null;
     gmvTotal?: number | null;
     callsCount?: number | null;
     odooActivities?: number | null;
+    weekly?: Array<{ label: string; dayLabel: string; from?: string; to?: string; count: number }>;
   } | null;
   period_start: string | null;
   period_end: string | null;
@@ -108,17 +112,23 @@ export async function fetchSaturdayContext({ key, from, to }: ScorecardHistoryQu
   if (rows.length === 0) {
     return { latest: null, saturdays: [] };
   }
-  const bySaturday = new Map<string, ScorecardValue>();
+  const bySaturday = new Map<string, { row: ScorecardValue; distMs: number }>();
   for (const row of rows) {
     const info = cairoDateParts(row.created_at);
     if (!info || info.weekday !== 6) continue;
-    if (!bySaturday.has(info.date)) {
-      bySaturday.set(info.date, row);
+    const target = Date.parse(`${info.date}T23:00:00+03:00`);
+    if (target > Date.now()) continue;
+    const at = Date.parse(String(row.created_at));
+    if (Number.isNaN(target) || Number.isNaN(at)) continue;
+    const distMs = Math.abs(at - target);
+    const cur = bySaturday.get(info.date);
+    if (!cur || distMs < cur.distMs) {
+      bySaturday.set(info.date, { row, distMs });
     }
   }
-  const saturdays = Array.from(bySaturday.values()).sort((a, b) =>
-    String(b.created_at ?? "").localeCompare(String(a.created_at ?? ""))
-  );
+  const saturdays = Array.from(bySaturday.values())
+    .map((entry) => entry.row)
+    .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
   return { latest: rows[rows.length - 1] ?? null, saturdays };
 }
 
@@ -146,12 +156,50 @@ export async function fetchScorecardLive(
   return { bundle: data, fresh };
 }
 
+export function previousWindowFor(from: string, to: string): { from: string; to: string } | null {
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const [ty, tm, td] = to.split("-").map(Number);
+  const startDate = new Date(fy, fm - 1, fd);
+  const endDate = new Date(ty, tm - 1, td);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || startDate > endDate) return null;
+  const inclusiveDays = Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1;
+  if (inclusiveDays < 1) return null;
+  const prevEndDate = new Date(startDate.getTime() - 86400000);
+  const prevStartDate = new Date(prevEndDate.getTime() - (inclusiveDays - 1) * 86400000);
+  const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { from: fmt(prevStartDate), to: fmt(prevEndDate) };
+}
+
+export interface ScorecardWindowQuery {
+  keys: string[];
+  from: string;
+  to: string;
+}
+
+export async function fetchScorecardWindowByKey({ keys, from, to }: ScorecardWindowQuery): Promise<Record<string, ScorecardValue>> {
+  if (keys.length === 0) return {};
+  const { data, error } = await supabase
+    .from("scorecard_values")
+    .select("*")
+    .in("scorecard_key", keys)
+    .gte("created_at", `${from}T00:00:00`)
+    .lte("created_at", `${to}T23:59:59.999`)
+    .order("created_at", { ascending: true });
+  if (error) {
+    throw new Error(error.message);
+  }
+  const map: Record<string, ScorecardValue> = {};
+  const rows = (data ?? []) as ScorecardValue[];
+  for (const row of rows) {
+    map[row.scorecard_key] = row;
+  }
+  return map;
+}
+
 export function formatScorecardValue(value: number | null, currency: string | null): string {
   if (value === null || value === undefined) return "—";
   const isPercent = value > -100 && value < 200 && String(currency ?? "").toLowerCase().includes("%");
   if (isPercent) return `${value.toFixed(2)}%`;
-  const asNumber = Math.abs(value) >= 1000
-    ? new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value)
-    : new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
+  const asNumber = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
   return `${asNumber} ${String(currency ?? "").toUpperCase()}`.trim();
 }

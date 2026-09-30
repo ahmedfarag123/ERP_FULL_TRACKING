@@ -253,6 +253,24 @@ function asNumber(value: unknown): number {
   return Number.isFinite(next) ? next : 0;
 }
 
+function asNullableNumber(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const next = Number(value);
+  return Number.isFinite(next) ? next : null;
+}
+
+function resolveSalesperson(
+  order: { user_id?: unknown; assigned_user_id_full_name?: unknown } | null | undefined,
+  salespersonByOdooId: Map<string, string | null>,
+): string | null {
+  const normalized = String(order?.user_id ?? "").replace(/\|/g, " ").trim();
+  if (!normalized) return String(order?.assigned_user_id_full_name ?? "").trim() || null;
+  if (/^\d+\s+\S/.test(normalized)) return normalized.replace(/^\d+\s+/, "").trim() || null;
+  const rawUserId = String(order?.user_id ?? "").trim();
+  if (/^\d+$/.test(rawUserId)) return salespersonByOdooId.get(rawUserId) ?? null;
+  return String(order?.assigned_user_id_full_name ?? "").trim() || null;
+}
+
 function dateOnly(value: string | null | undefined): string | null {
   if (!value) return null;
   return value.slice(0, 10);
@@ -1398,6 +1416,7 @@ export interface AllShipmentRow {
   id: string;
   reference: string;
   customerName: string | null;
+  salesperson: string | null;
   warehouseName: string | null;
   shipmentStatus: string | null;
   planId: string | null;
@@ -1484,7 +1503,7 @@ export async function fetchDeliveryAnalytics(range: DateRangeValue): Promise<Del
   const rangeStart = startIso ? new Date(startIso).getTime() : -Infinity;
   const rangeEnd = endIso ? new Date(endIso).getTime() : Infinity;
 
-  const [{ data: plans, error: plansErr }, { data: profiles, error: profilesErr }, { data: collections, error: collectionErr }, { data: orderCollections, error: orderCollErr }] =
+  const [{ data: plans, error: plansErr }, { data: profiles, error: profilesErr }, { data: collections, error: collectionErr }, { data: orderCollections, error: orderCollErr }, { data: paymentLegs, error: legsErr }] =
     await Promise.all([
       supabase.from("logistics_delivery_plans").select("id, assigned_profile_id"),
       supabase.from("profiles").select("id, full_name"),
@@ -1496,11 +1515,15 @@ export async function fetchDeliveryAnalytics(range: DateRangeValue): Promise<Del
       supabase
         .from("logistics_order_collections")
         .select("shipment_id, order_total, payment_method"),
+      supabase
+        .from("logistics_order_collection_payment_legs")
+        .select("shipment_id, payment_method, amount"),
     ]);
   if (plansErr) throw plansErr;
   if (profilesErr) throw profilesErr;
   if (collectionErr) throw collectionErr;
   if (orderCollErr) throw orderCollErr;
+  if (legsErr) throw legsErr;
 
   const profileName = new Map<string, string>(
     (profiles ?? []).map((p: any) => [String(p.id), String(p.full_name ?? "سائق")]),
@@ -1531,9 +1554,24 @@ export async function fetchDeliveryAnalytics(range: DateRangeValue): Promise<Del
     collectionByShipment.set(String(c.shipment_id), c as Record<string, any>);
   }
 
+  const legsByShipment = new Map<string, { total: number; byMethod: Record<string, number> }>();
+  for (const leg of (paymentLegs ?? []) as any[]) {
+    const sid = String(leg.shipment_id);
+    let agg = legsByShipment.get(sid);
+    if (!agg) {
+      agg = { total: 0, byMethod: {} };
+      legsByShipment.set(sid, agg);
+    }
+    const amt = asNumber(leg.amount);
+    const method = String(leg.payment_method ?? "cash");
+    agg.total += amt;
+    agg.byMethod[method] = (agg.byMethod[method] ?? 0) + amt;
+  }
+
   const orderCollByShipment = new Map<string, { total: number; byMethod: Record<string, number> }>();
   for (const oc of (orderCollections ?? []) as any[]) {
     const sid = String(oc.shipment_id);
+    if (legsByShipment.has(sid)) continue;
     let agg = orderCollByShipment.get(sid);
     if (!agg) {
       agg = { total: 0, byMethod: {} };
@@ -1569,6 +1607,8 @@ export async function fetchDeliveryAnalytics(range: DateRangeValue): Promise<Del
         driver,
         coll: collectionByShipment.get(String(s.id)),
         ordColl: orderCollByShipment.get(String(s.id)),
+        ordLegs: legsByShipment.get(String(s.id)),
+        deliveredInvoiceAmount: asNumber((s as any).delivered_invoice_amount),
       };
     })
     .filter((s) => s.ts !== null && s.ts >= rangeStart && s.ts <= rangeEnd);
@@ -1618,7 +1658,19 @@ export async function fetchDeliveryAnalytics(range: DateRangeValue): Promise<Del
 
     const coll = s.coll;
     const ordColl = s.ordColl;
-    if (ordColl) {
+    const ordLegs = (s as any).ordLegs as { total: number; byMethod: Record<string, number> } | undefined;
+    const deliveredInvAmt = (s as any).deliveredInvoiceAmount as number | undefined;
+    if (ordLegs && ordLegs.total > 0) {
+      const expected = deliveredInvAmt && deliveredInvAmt > 0 ? deliveredInvAmt : ordLegs.total;
+      const collected = ordLegs.total;
+      codExpectedTotal += expected;
+      codCollectedTotal += collected;
+      stat.codExpected += expected;
+      stat.codCollected += collected;
+      for (const [method, amt] of Object.entries(ordLegs.byMethod)) {
+        paymentAmounts[method] = (paymentAmounts[method] ?? 0) + amt;
+      }
+    } else if (ordColl) {
       const expected = ordColl.total;
       const collected = ordColl.total;
       codExpectedTotal += expected;
@@ -1709,10 +1761,16 @@ export async function fetchDeliveryAnalytics(range: DateRangeValue): Promise<Del
     .map((s) => {
       const coll = s.coll;
       const ordColl = s.ordColl;
+      const ordLegs = (s as any).ordLegs as { total: number; byMethod: Record<string, number> } | undefined;
+      const deliveredInvAmt = (s as any).deliveredInvoiceAmount as number | undefined;
       const collStatus = coll ? String(coll.collection_status ?? "") : "";
       let expected = 0;
       let paymentMethod: string | null = null;
-      if (ordColl) {
+      if (ordLegs && ordLegs.total > 0) {
+        expected = deliveredInvAmt && deliveredInvAmt > 0 ? deliveredInvAmt : ordLegs.total;
+        const methods = Object.entries(ordLegs.byMethod);
+        if (methods.length > 0) paymentMethod = methods[0][0];
+      } else if (ordColl) {
         expected = ordColl.total;
         const methods = Object.entries(ordColl.byMethod);
         if (methods.length > 0) paymentMethod = methods[0][0];
@@ -1763,7 +1821,7 @@ export async function fetchAllShipments(range?: DateRangeValue): Promise<AllShip
   let query = supabase
     .from("logistics_shipments")
     .select(
-      "id, shipment_reference, external_shipment_id, customer_name, warehouse_name, shipment_status, plan_id, assigned_user_name, completed_at, created_at, total_gmv, scheduled_at, orders:linked_order_id(commitment_date), logistics_delivery_plans!left(plan_reference, plan_status)",
+      "id, shipment_reference, external_shipment_id, customer_name, warehouse_name, shipment_status, plan_id, assigned_user_name, completed_at, created_at, total_gmv, is_return_shipment, scheduled_at, orders:linked_order_id(commitment_date, amount_total, total_amount, currency_code, user_id, assigned_user_id_full_name), logistics_delivery_plans!left(plan_reference, plan_status)",
     )
     .not("source", "eq", "manual_test")
     .order("created_at", { ascending: false });
@@ -1774,12 +1832,23 @@ export async function fetchAllShipments(range?: DateRangeValue): Promise<AllShip
     if (endIso) query = query.lte("scheduled_at", endIso);
   }
 
-  const { data, error } = await query;
+  const [{ data, error }, salespersonsResult] = await Promise.all([
+    query,
+    supabase.from("salespersons_odoo").select("user_id, salesperson_name"),
+  ]);
   if (error) throw error;
+  const salespersonByOdooId = new Map<string, string | null>(
+    (salespersonsResult.data ?? []).map(
+      (row: any): [string, string | null] => [String(row.user_id).trim(), row.salesperson_name ?? null],
+    ),
+  );
 
   return (data ?? []).map((row: any) => {
     const plan = row.logistics_delivery_plans;
     const order = Array.isArray(row.orders) ? row.orders[0] : row.orders;
+    const orderMoney = asNullableNumber(order?.amount_total) ?? asNullableNumber(order?.total_amount);
+    const gmvMoney = asNullableNumber(row.total_gmv);
+    const shipmentValue = row.is_return_shipment ? gmvMoney ?? orderMoney : orderMoney ?? gmvMoney;
     return {
       id: row.id,
       reference: row.shipment_reference ?? row.external_shipment_id ?? row.id.slice(0, 8),
@@ -1793,7 +1862,8 @@ export async function fetchAllShipments(range?: DateRangeValue): Promise<AllShip
       completedAt: row.completed_at ?? null,
       createdAt: row.created_at,
       deliveryDate: dateOnly(order?.commitment_date ?? row.scheduled_at),
-      totalGmv: asNumber(row.total_gmv) ?? null,
+      salesperson: resolveSalesperson(order, salespersonByOdooId),
+      totalGmv: shipmentValue,
     };
   });
 }

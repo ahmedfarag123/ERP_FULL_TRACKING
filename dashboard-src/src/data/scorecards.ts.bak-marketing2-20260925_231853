@@ -1,0 +1,148 @@
+export interface ScorecardDef {
+  key: string;
+  department: string;
+  scorecard: string;
+  module: string;
+  view: string;
+  field: string;
+  implemented: boolean;
+  goodWhen?: "higher" | "lower";
+  summaryFirst?: "amount" | "count";
+}
+
+export function isGoodDelta(def: Pick<ScorecardDef, "goodWhen">, delta: number | null): boolean | null {
+  if (delta === null) return null;
+  return (def.goodWhen ?? "higher") === "higher" ? delta >= 0 : delta < 0;
+}
+
+export const DEPARTMENT_ORDER = [
+  "Finance",
+  "Collection Department",
+  "Sales",
+  "Purchase",
+  "Logistics",
+  "Marketing",
+  "Customer Service",
+] as const;
+
+export const DEPARTMENT_LABELS: Record<string, string> = {
+  Finance: "Finance",
+  "Collection Department": "Collection Department",
+  Sales: "Sales",
+  Purchase: "Purchase",
+  Logistics: "Logistics",
+  Marketing: "Marketing",
+  "Customer Service": "Customer Service",
+};
+
+export const DEPARTMENT_ICONS: Record<string, string> = {
+  Finance: "dollar",
+  "Collection Department": "dollar",
+  Sales: "box",
+  Purchase: "box",
+  Logistics: "list",
+  Marketing: "pie",
+  "Customer Service": "group",
+};
+
+export const SCORECARDS: ScorecardDef[] = [
+  { key: "finance.total_payable", department: "Finance", scorecard: "Total Payable", module: "Accounting", view: "General Ledger", field: "Payables", implemented: true, goodWhen: "lower" },
+  { key: "finance.unreconciled_bills", department: "Finance", scorecard: "Unreconciled Bills", module: "Accounting", view: "Bills", field: "Invoice Has Outstanding", implemented: true, goodWhen: "lower" },
+  { key: "finance.pending_custodies", department: "Finance", scorecard: "Pending Custodies", module: "Accounting", view: "General Ledger", field: "Total Custody", implemented: true, goodWhen: "lower" },
+  { key: "finance.pending_loans", department: "Finance", scorecard: "Pending Loans", module: "Accounting", view: "General Ledger", field: "Total Loans", implemented: true, goodWhen: "lower" },
+  { key: "finance.total_receivable", department: "Finance", scorecard: "Total Recievable", module: "Accounting", view: "General Ledger", field: "Recievable", implemented: true, goodWhen: "lower" },
+  { key: "finance.unreconciled_invoices", department: "Finance", scorecard: "Unreconciled Invoices", module: "Accounting", view: "Invoices", field: "Invoice Has Outstanding", implemented: true, goodWhen: "lower" },
+  { key: "finance.cancelled_invoices", department: "Finance", scorecard: "Cancelled Invoices", module: "Accounting", view: "Invoices", field: "Invoice Status", implemented: true, goodWhen: "lower" },
+  { key: "finance.invoicing_over_12h", department: "Finance", scorecard: "Invoicing > 12:00 AM", module: "Sales", view: "Orders", field: "Diff Between Delivery Date & Invoice Creation Date", implemented: true, goodWhen: "lower" },
+  { key: "finance.invoicing_over_24h", department: "Finance", scorecard: "Invoicing > 24H", module: "Sales", view: "Orders", field: "Diff Between Delivery Date & Invoice Creation Date", implemented: true, goodWhen: "lower" },
+  { key: "finance.orders_to_invoice", department: "Finance", scorecard: "Orders To Invoice", module: "Sales", view: "Orders", field: "To Invoice", implemented: true, goodWhen: "lower" },
+  { key: "finance.expenses_budget", department: "Finance", scorecard: "Expenses Budget", module: "Accounting", view: "Profit and loss", field: "Expenses", implemented: true, goodWhen: "lower" },
+  { key: "finance.journals_no_partner", department: "Finance", scorecard: "Journals No Partner", module: "Accounting", view: "Journal Items", field: "(AR - AP - Custody - Loan) with no partner", implemented: true, goodWhen: "lower" },
+
+  { key: "collection.dso_mas_credit", department: "Collection Department", scorecard: "DSO MAS (Credit)", module: "Sales", view: "Reporting", field: "total due credit MAS / Total sales credit MAS 3 months", implemented: true, goodWhen: "lower" },
+  { key: "collection.dso_mas_cash", department: "Collection Department", scorecard: "DSO MAS (Cash)", module: "Sales", view: "Reporting", field: "total due Cash MAS / Total sales Cash MAS 3 months", implemented: true, goodWhen: "lower" },
+  { key: "collection.dso_horeca_credit", department: "Collection Department", scorecard: "DSO Horeca (Credit)", module: "Sales", view: "Reporting", field: "total due credit Horeca/ Total sales Credit Horeca 3 months", implemented: true, goodWhen: "lower" },
+  { key: "collection.dso_horeca_cash", department: "Collection Department", scorecard: "DSO Horeca (Cash)", module: "Sales", view: "Reporting", field: "total due Cash Horeca/ Total sales Cash Horeca 3 months", implemented: true, goodWhen: "lower" },
+  { key: "collection.dso_other", department: "Collection Department", scorecard: "DSO Other", module: "Sales", view: "Reporting", field: "total due other customers / Total sales Other Customers 3 months", implemented: true, goodWhen: "lower" },
+  { key: "collection.total_collected", department: "Collection Department", scorecard: "Total Collected", module: "Google Sheet", view: "Collection Team", field: "Sum of collected", implemented: true },
+  { key: "collection.total_visits", department: "Collection Department", scorecard: "Total Visits", module: "Google Sheet", view: "Collection Team", field: "Count of Visits", implemented: true },
+  { key: "collection.due_over_60", department: "Collection Department", scorecard: "DUE > 60 Days", module: "Google Sheet", view: "Aged Receivable ", field: "Total due > 60 days", implemented: true, goodWhen: "lower" },
+  { key: "collection.unpaid_cash_mas", department: "Collection Department", scorecard: "Unpaid Cash MAS", module: "Accounting", view: "Invoices", field: "total due Cash MAS", implemented: true, goodWhen: "lower" },
+  { key: "collection.unpaid_cash_horeca", department: "Collection Department", scorecard: "Unpaid Cash Horeca", module: "Accounting", view: "Invoices", field: "total due Cash Horeca", implemented: true, goodWhen: "lower" },
+  { key: "collection.sales_approved_credit_policy", department: "Collection Department", scorecard: "Sales Approved By Credit Policy", module: "Sales", view: "Orders", field: "Count of customers with due / total customers", implemented: true, goodWhen: "higher" },
+  { key: "collection.documented_credit", department: "Collection Department", scorecard: "Documented Credit", module: "Google Sheet", view: "Documented Credit", field: "Count of documents", implemented: false },
+
+  { key: "sales.gmv_mas", department: "Sales", scorecard: "GMV MAS (Average)", module: "Sales", view: "reporting", field: "Total Invoiced MAS", implemented: true, goodWhen: "higher" },
+  { key: "sales.mas_customers", department: "Sales", scorecard: "MAS Customers", module: "Sales", view: "reporting", field: "Count of Customers In MAS", implemented: true },
+  { key: "sales.mas_average_order", department: "Sales", scorecard: "MAS Orders (Average)", module: "Sales", view: "reporting", field: "total invoiced / count of customers (MAS)", implemented: true },
+  { key: "sales.products_sold_mas", department: "Sales", scorecard: "Products sold MAS", module: "Sales", view: "reporting", field: "Count of products sold In MAS", implemented: true },
+  { key: "sales.gmv_horeca", department: "Sales", scorecard: "GMV Horeca (Average)", module: "Sales", view: "reporting", field: "Total Invoiced Horeca", implemented: true, summaryFirst: "amount" as const },
+  { key: "sales.horeca_customers", department: "Sales", scorecard: "Horeca Customers", module: "Sales", view: "reporting", field: "Count of Customers In Horeca", implemented: true },
+  { key: "sales.horeca_average_order", department: "Sales", scorecard: "Horeca Orders (Average)", module: "Sales", view: "reporting", field: "total invoiced / count of customers (Horeca)", implemented: true },
+  { key: "sales.products_sold_horeca", department: "Sales", scorecard: "Products sold Horeca", module: "Sales", view: "reporting", field: "Count of products sold In Horeca", implemented: true },
+  { key: "sales.crm_activities", department: "Sales", scorecard: "CRM Activities", module: "CRM", view: "reporting", field: "Count of activities", implemented: true },
+  { key: "sales.new_customers", department: "Sales", scorecard: "New Customers", module: "Contacts", view: "List", field: "Count of Created on belongs to Horeca", implemented: true },
+  { key: "sales.retention_rate", department: "Sales", scorecard: "Retention Rate", module: "Sales", view: "reporting", field: "Active customers - new customers during 1 month / active customers month ago", implemented: true },
+  { key: "sales.sales_by_app", department: "Sales", scorecard: "Sales By App", module: "Sales", view: "Orders", field: "Horeca orders by app pricelist / Horeca total orders", implemented: true },
+  { key: "sales.active_customers", department: "Sales", scorecard: "Active Customers", module: "Sales", view: "reporting", field: "Count of customers sales during 30 days", implemented: true },
+
+  { key: "purchase.stockout_top100", department: "Purchase", scorecard: "StockOut - top 100 SKU", module: "Inventory", view: "Products", field: "Compare top 100 product sales to available stock", implemented: true, goodWhen: "lower" },
+  { key: "purchase.stockout_products", department: "Purchase", scorecard: "StockOut Products", module: "Inventory", view: "reporting", field: "Count of products out of stock (<=0)", implemented: true, goodWhen: "lower" },
+  { key: "purchase.available_products", department: "Purchase", scorecard: "Available Products", module: "Inventory", view: "reporting", field: "Count of products in stock (>0)", implemented: true },
+  { key: "purchase.new_products", department: "Purchase", scorecard: "New Products", module: "Inventory", view: "Products", field: "Count of products created on", implemented: true },
+  { key: "purchase.products_purchased", department: "Purchase", scorecard: "Products Purchased", module: "Purchase", view: "reporting", field: "Count of products purchased", implemented: true },
+  { key: "purchase.purchase_orders", department: "Purchase", scorecard: "Purchase Orders", module: "Purchase", view: "reporting", field: "Count of PO Created", implemented: true },
+  { key: "purchase.accuracy_of_purchase", department: "Purchase", scorecard: "Accuracy of purchase orders", module: "Purchase", view: "reporting", field: "Compare ordered qty to billed qty", implemented: true },
+  { key: "purchase.receipts_date_24h", department: "Purchase", scorecard: "Reciepts Date <24H", module: "Purchase", view: "reporting", field: "Compare creation date to receipt date", implemented: true, goodWhen: "lower" },
+  { key: "purchase.gross_margin_mas", department: "Purchase", scorecard: "Gross Margin Horeca", module: "Sales", view: "reporting", field: "Horeca sales with Margin", implemented: true },
+  { key: "purchase.gross_margin_horeca", department: "Purchase", scorecard: "Gross Margin MAS", module: "Sales", view: "reporting", field: "MAS sales with Margin", implemented: true },
+  { key: "purchase.margin_lte_1", department: "Purchase", scorecard: "Margin <= 1%", module: "Inventory", view: "Products", field: "Compare Sale price to List Price", implemented: true, goodWhen: "lower" },
+  { key: "purchase.variance_of_prices", department: "Purchase", scorecard: "Variance of Prices", module: "Purchase", view: "Orders", field: "PO with message created by Abdullah - Khaled", implemented: true, goodWhen: "lower" },
+
+  { key: "logistics.inventory_days", department: "Logistics", scorecard: "Inventory Days", module: "Inventory", view: "reporting", field: "stock valuation / cost of goods sold during 3 months", implemented: true, goodWhen: "lower" },
+  { key: "logistics.internal_transfers", department: "Logistics", scorecard: "Internal Transfers", module: "Inventory", view: "Operations", field: "Count of Internal transfers", implemented: true },
+  { key: "logistics.company_transfers", department: "Logistics", scorecard: "Company Transfers", module: "Sales", view: "Orders", field: "Count of orders with partner ( MAS or Horeca Smart)", implemented: true },
+  { key: "logistics.near_expire_products", department: "Logistics", scorecard: "NearExpire Products", module: "Inventory", view: "reporting", field: "Count of products which is expired or near expire", implemented: true, goodWhen: "lower" },
+  { key: "logistics.returns_count", department: "Logistics", scorecard: "Returns Count", module: "Sales", view: "Orders", field: "Count of orders with invoice status (nothing to invoice)", implemented: true, goodWhen: "lower" },
+  { key: "logistics.returns_value", department: "Logistics", scorecard: "Returns Value", module: "Sales", view: "Orders", field: "Compare total ordered to total invoiced", implemented: true, goodWhen: "lower" },
+  { key: "logistics.orders_to_validate", department: "Logistics", scorecard: "Orders To Validate", module: "Inventory", view: "operations", field: "Count of orders waiting or ready", implemented: true, goodWhen: "lower" },
+  { key: "logistics.validate_over_11am", department: "Logistics", scorecard: "Validate > 11:00 AM", module: "Inventory", view: "operations", field: "Compare scheduled date to Date of transfer", implemented: true, goodWhen: "lower" },
+
+  { key: "marketing.views", department: "Marketing", scorecard: "Views", module: "Social Media", view: "Meta", field: "Marketing Department", implemented: false },
+  { key: "marketing.followers", department: "Marketing", scorecard: "Followers", module: "Social Media", view: "Meta", field: "Marketing Department", implemented: false },
+  { key: "marketing.followers_increase", department: "Marketing", scorecard: "Followers Increase", module: "Social Media", view: "Meta", field: "Marketing Department", implemented: false },
+  { key: "marketing.engagement", department: "Marketing", scorecard: "Engagement", module: "Social Media", view: "Meta", field: "Marketing Department", implemented: false },
+  { key: "marketing.registrations", department: "Marketing", scorecard: "Registrations", module: "Tabex", view: "Customers", field: "Count of customers registered by marketing", implemented: false },
+  { key: "marketing.first_orders_by_app", department: "Marketing", scorecard: "First Orders By App", module: "Tabex", view: "Customers", field: "Count of customers with orders", implemented: false },
+  { key: "marketing.repeated_orders", department: "Marketing", scorecard: "Repeated Orders", module: "Tabex", view: "Customers", field: "Count of customers with >1 order", implemented: false },
+  { key: "marketing.total_sales", department: "Marketing", scorecard: "Total Sales", module: "Tabex", view: "Orders", field: "Sum of total for registered customers", implemented: false },
+
+  { key: "cs.count_of_tickets", department: "Customer Service", scorecard: "Count Of Tickets", module: "Help desk", view: "Tickets", field: "Customer Service", implemented: false },
+  { key: "cs.resolved_tickets", department: "Customer Service", scorecard: "Resolved Tickets", module: "Help desk", view: "Tickets", field: "Customer Service", implemented: false },
+  { key: "cs.percent_of_tickets", department: "Customer Service", scorecard: "Percent of Tickets", module: "Help desk", view: "Tickets", field: "Customer Service", implemented: false },
+  { key: "cs.resolving_rate", department: "Customer Service", scorecard: "Resolving Rate", module: "Help desk", view: "Tickets", field: "Customer Service", implemented: false },
+];
+
+export const STATIC_SCORECARD_VALUES: Record<
+  string,
+  { value: string; lastWeek: string; current: number; previous: number; goodWhen?: "higher" | "lower" }
+> = {
+  "marketing.views": { value: "4,3K", lastWeek: "1,9K", current: 4300, previous: 1900, goodWhen: "higher" },
+  "marketing.followers": { value: "23,377", lastWeek: "23,416", current: 23377, previous: 23416, goodWhen: "higher" },
+  "marketing.followers_increase": { value: "-8", lastWeek: "-29", current: -8, previous: -29, goodWhen: "higher" },
+  "marketing.engagement": { value: "35", lastWeek: "9", current: 35, previous: 9, goodWhen: "higher" },
+  "marketing.registrations": { value: "15", lastWeek: "12", current: 15, previous: 12, goodWhen: "higher" },
+  "marketing.first_orders_by_app": { value: "8", lastWeek: "8", current: 8, previous: 8, goodWhen: "higher" },
+  "marketing.repeated_orders": { value: "0", lastWeek: "0", current: 0, previous: 0, goodWhen: "higher" },
+  "marketing.total_sales": { value: "41K", lastWeek: "43K", current: 41000, previous: 43000, goodWhen: "higher" },
+};
+
+export const IMPLEMENTED_KEYS = SCORECARDS.filter((s) => s.implemented).map((s) => s.key);
+
+export function getScorecardByKey(key: string): ScorecardDef | undefined {
+  return SCORECARDS.find((s) => s.key === key);
+}
+
+export function getScorecardsByDepartment(department: string): ScorecardDef[] {
+  return SCORECARDS.filter((s) => s.department === department);
+}

@@ -19,6 +19,7 @@ import {
   Scale,
   Minus,
   Plus,
+  Upload,
 } from 'lucide-react';
 import { useDeliveryStore } from '@/stores/deliveryStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -50,6 +51,7 @@ export default function ShipmentDetailScreen() {
   const navigate = useNavigate();
 
   const isLoading = useDeliveryStore((s) => s.isLoading);
+  const loadShipments = useDeliveryStore((s) => s.loadShipments);
   const shipment = useDeliveryStore((s) => s.getShipmentById(id || ''));
   const updateStatus = useDeliveryStore((s) => s.updateShipmentStatus);
   const addNote = useDeliveryStore((s) => s.addShipmentNote);
@@ -57,6 +59,7 @@ export default function ShipmentDetailScreen() {
   const reportFailure = useDeliveryStore((s) => s.reportFailure);
   const user = useAuthStore((s) => s.user);
   const showToast = useUIStore((s) => s.showToast);
+  const queueOfflineAction = useUIStore((s) => s.queueOfflineAction);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [showPODSheet, setShowPODSheet] = useState(() => {
@@ -79,6 +82,8 @@ export default function ShipmentDetailScreen() {
   // Failure form state
   const [failureReason, setFailureReason] = useState('');
   const [failureNotes, setFailureNotes] = useState('');
+  const [returnType, setReturnType] = useState<'full' | 'partial'>('full');
+  const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
 
   // Note form state
   const [newNote, setNewNote] = useState('');
@@ -120,7 +125,9 @@ export default function ShipmentDetailScreen() {
         }
         setCameraReady(true);
       } catch (error) {
-        setCameraError(error instanceof Error ? error.message : String(error));
+        setCameraError(
+          'تعذر تشغيل الكاميرا. افتح التطبيق من الرابط الرسمي https://horecasmartos.duckdns.org/driver على HTTPS، أو اسمح للكاميرا من إعدادات الموقع 🔒، أو ارفع صورة من الملفات.',
+        );
       }
     };
 
@@ -210,6 +217,27 @@ export default function ShipmentDetailScreen() {
     }
   };
 
+  const handleRetryCamera = async () => {
+    setCameraError(null);
+    setCameraReady(false);
+    cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
+    cameraStreamRef.current = null;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      cameraStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setCameraReady(true);
+    } catch {
+      setCameraError('تعذر تشغيل الكاميرا. يمكنك رفع صورة من الملفات كبديل.');
+    }
+  };
+
   const handleCapturePhoto = async () => {
     const video = videoRef.current;
     if (!video || !cameraReady) return;
@@ -243,6 +271,14 @@ export default function ShipmentDetailScreen() {
     setCapturedPhoto(URL.createObjectURL(file));
   };
 
+  const handlePodFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (capturedPhoto) URL.revokeObjectURL(capturedPhoto);
+    setCapturedFile(file);
+    setCapturedPhoto(URL.createObjectURL(file));
+  };
+
   const handleConfirmDelivery = async () => {
     if (isSubmittingAction) return;
     if (!capturedFile || !user?.id) return;
@@ -258,8 +294,27 @@ export default function ShipmentDetailScreen() {
           doneQuantity: deliveredQuantity,
         }));
 
+      if (partialDeliveryItems.length > 0 && itemsToUpdate.length < partialDeliveryItems.length) {
+        // A shipment with items must persist every item's delivered quantity; a
+        // missing id means the record cannot be written and would silently mark
+        // the delivery complete with quantity 0. Surface it instead.
+        throw new Error('تعذر حفظ الكميات المسلَّمة: بيانات الصنف غير مكتملة. أعد تحميل الشحنة.');
+      }
+
       if (itemsToUpdate.length > 0) {
-        await driverUpdateShipmentItems(shipment.id, itemsToUpdate);
+        try {
+          await driverUpdateShipmentItems(shipment.id, itemsToUpdate);
+        } catch (err) {
+          // Persist the quantities for later replay so they are never lost, then
+          // abort: the phase transition below must not complete a delivery whose
+          // quantities were not stored.
+          queueOfflineAction({
+            type: 'items_updated',
+            shipmentId: shipment.id,
+            payload: { items: itemsToUpdate },
+          });
+          throw err;
+        }
       }
 
       const proofPath = await uploadDeliveryProof(user.id, capturedFile);
@@ -287,6 +342,15 @@ export default function ShipmentDetailScreen() {
       setPodNotes('');
 
       if (shouldShowCollection) {
+        // Wait for the post-POD refresh so the collection sheet opens with the
+        // persisted quantities and the server-side net invoice amount instead
+        // of the pre-delivery snapshot (the refresh is best effort: a failed
+        // reload must not block the collection flow).
+        try {
+          await loadShipments();
+        } catch {
+          // Keep the last known data and continue.
+        }
         setShowCollectionSheet(true);
       } else {
         setShowSuccessOverlay(true);
@@ -302,11 +366,29 @@ export default function ShipmentDetailScreen() {
     if (isSubmittingAction) return;
     setIsSubmittingAction(true);
     try {
-      await reportFailure(shipment.id, failureReason, failureNotes);
+      const items = returnType === 'partial'
+        ? shipment.items
+            .filter((item) => {
+              const key = item.id ?? item.productRef ?? item.name ?? '';
+              return key && (returnQuantities[key] ?? 0) > 0;
+            })
+            .map((item) => ({
+              itemId: item.id ?? '',
+              productName: item.name ?? '',
+              returnedQuantity: returnQuantities[item.id ?? item.productRef ?? item.name ?? ''] ?? 0,
+            }))
+        : shipment.items.map((item) => ({
+            itemId: item.id ?? '',
+            productName: item.name ?? '',
+            returnedQuantity: Math.max(0, (item.requestedQuantity ?? item.quantity ?? 0) - (item.doneQuantity ?? 0)),
+          }));
+      await reportFailure(shipment.id, failureReason, failureNotes, undefined, returnType, items);
       setShowFailureSheet(false);
       setFailureReason('');
       setFailureNotes('');
-      showToast('تم تسجيل فشل التسليم', 'error');
+      setReturnType('full');
+      setReturnQuantities({});
+      showToast('تم تسجيل فشل التسليم والمرتجع', 'error');
       navigate('/deliveries');
     } catch {
       // The store shows the backend error and reloads stale optimistic state.
@@ -660,6 +742,18 @@ export default function ShipmentDetailScreen() {
               {isSubmittingAction ? 'جاري الحفظ...' : 'بدء التسليم'}
             </button>
             <button
+              onClick={() => {
+                setReturnType('full');
+                setReturnQuantities({});
+                setShowFailureSheet(true);
+              }}
+              disabled={isSubmittingAction}
+              className="h-[52px] px-4 border border-app-error text-app-error rounded-xl font-semibold flex items-center justify-center gap-2 active:scale-[0.96] active:bg-error-50 transition-all disabled:opacity-50"
+            >
+              <XCircle size={18} />
+              مرتجع كامل
+            </button>
+            <button
               onClick={() => setShowNoteSheet(true)}
               className="h-[52px] px-4 border border-app-dark text-app-dark rounded-xl font-semibold flex items-center justify-center gap-2 active:bg-app-light transition-all"
             >
@@ -780,10 +874,30 @@ export default function ShipmentDetailScreen() {
                     <XCircle size={16} className="text-white" />
                   </button>
                 </div>
-              ) : cameraError ? (
-                <div className="px-4 text-center">
+                  ) : cameraError ? (
+                <div className="px-4 text-center space-y-3">
                   <Camera size={40} className="mx-auto text-gray-400" />
-                  <p className="mt-2 text-sm text-app-error">{cameraError}</p>
+                  <p className="text-sm text-app-error leading-relaxed">{cameraError}</p>
+                  <div className="flex items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRetryCamera}
+                      className="h-9 px-4 rounded-lg border border-gray-300 bg-white text-sm font-medium text-app-text flex items-center gap-1.5 active:bg-gray-50"
+                    >
+                      <RefreshCw size={14} />
+                      إعادة المحاولة
+                    </button>
+                    <label className="h-9 px-4 rounded-lg bg-app-accent text-white text-sm font-medium flex items-center gap-1.5 cursor-pointer active:scale-[0.96]">
+                      <Upload size={14} />
+                      رفع من الملفات
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handlePodFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
                 </div>
               ) : (
                 <div className="relative h-full w-full bg-black">
@@ -800,8 +914,13 @@ export default function ShipmentDetailScreen() {
                     </div>
                   )}
                   {cameraReady && (
-                    <div className="absolute bottom-3 left-3 right-3 bg-black/70 rounded-lg px-3 py-2 text-xs text-white text-center">
-                      التقط صورة للبضاعة المسلمة أو إيصال العميل
+                    <div className="absolute bottom-3 left-3 right-3 bg-black/70 rounded-lg px-3 py-2 text-xs text-white text-center flex items-center justify-center gap-3">
+                      <span>التقط صورة للبضاعة المسلمة أو إيصال العميل</span>
+                      <label className="text-xs text-app-accent underline cursor-pointer whitespace-nowrap flex items-center gap-1">
+                        <Upload size={12} />
+                        رفع من الملفات
+                        <input type="file" accept="image/*" onChange={handlePodFileUpload} className="hidden" />
+                      </label>
                     </div>
                   )}
                 </div>
@@ -929,7 +1048,7 @@ export default function ShipmentDetailScreen() {
         {showFailureSheet && (
           <BottomSheet
             isOpen={showFailureSheet}
-            onClose={() => { setShowFailureSheet(false); setFailureReason(''); setFailureNotes(''); }}
+            onClose={() => { setShowFailureSheet(false); setFailureReason(''); setFailureNotes(''); setReturnType('full'); setReturnQuantities({}); }}
             title="تسجيل فشل التسليم"
             subtitle={`الشحنة #${shipment.id}`}
           >
@@ -940,7 +1059,7 @@ export default function ShipmentDetailScreen() {
               <select
                 value={failureReason}
                 onChange={(e) => setFailureReason(e.target.value)}
-                className="w-full h-12 bg-gray-100 rounded-xl px-4 text-sm text-app-text focus:outline-none focus:ring-2 focus:ring-app-accent mt-2"
+                className="w-full h-12 bg-gray-100 rounded-xl px-4 text-sm text-app-text focus:outline-none focus:ring-2 focus:ring-app-accent mt-2 [&>option]:bg-white [&>option]:text-gray-900"
               >
                 <option value="">اختر السبب...</option>
                 <option value="customer_not_available">العميل غير متواجد</option>
@@ -968,17 +1087,108 @@ export default function ShipmentDetailScreen() {
               />
             </div>
 
+            {/* Return Type */}
+            {failureReason.trim() && (
+              <div className="mt-4">
+                <label className="text-sm font-medium text-app-text">
+                  نوع المرتجع <span className="text-app-error">*</span>
+                </label>
+                <div className="flex gap-3 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setReturnType('full')}
+                    className={`flex-1 h-12 rounded-xl font-semibold text-sm transition-all ${
+                      returnType === 'full'
+                        ? 'bg-app-dark text-white'
+                        : 'bg-gray-100 text-app-text'
+                    }`}
+                  >
+                    مرتجع كلي
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReturnType('partial')}
+                    className={`flex-1 h-12 rounded-xl font-semibold text-sm transition-all ${
+                      returnType === 'partial'
+                        ? 'bg-app-dark text-white'
+                        : 'bg-gray-100 text-app-text'
+                    }`}
+                  >
+                    مرتجع جزئي
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Partial Return Items */}
+            {failureReason.trim() && returnType === 'partial' && (
+              <div className="mt-3">
+                <label className="text-xs font-medium text-app-text-secondary mb-2 block">
+                  حدد الكمية المرتجعة من كل صنف
+                </label>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {shipment.items.map((item) => {
+                    const key = item.id ?? item.productRef ?? item.name ?? '';
+                    const maxQty = Math.max(
+                      0,
+                      Math.min(
+                        (item.approvedQuantity ?? item.requestedQuantity ?? item.quantity ?? 0),
+                        item.requestedQuantity ?? item.quantity ?? 0
+                      ) - (item.doneQuantity ?? 0)
+                    );
+                    if (maxQty <= 0) return null;
+                    const currentVal = returnQuantities[key] ?? 0;
+                    return (
+                      <div key={key} className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs font-medium text-app-text truncate block">{item.name}</span>
+                          <span className="text-[10px] text-app-text-secondary">متاح: {maxQty}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setReturnQuantities((prev) => ({ ...prev, [key]: Math.max(0, (prev[key] ?? 0) - 1) }))}
+                            className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            min={0}
+                            max={maxQty}
+                            value={currentVal}
+                            onChange={(e) => {
+                              const v = Math.min(maxQty, Math.max(0, parseInt(e.target.value) || 0));
+                              setReturnQuantities((prev) => ({ ...prev, [key]: v }));
+                            }}
+                            className="w-12 h-8 text-center text-sm rounded-lg border border-gray-200 bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setReturnQuantities((prev) => ({ ...prev, [key]: Math.min(maxQty, (prev[key] ?? 0) + 1) }))}
+                            className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Submit */}
             <button
               onClick={() => void handleReportFailure()}
-              disabled={!failureReason.trim() || isSubmittingAction}
+              disabled={!failureReason.trim() || isSubmittingAction || (returnType === 'partial' && Object.values(returnQuantities).every((v) => !v))}
               className="w-full h-[52px] bg-app-error text-white rounded-xl font-semibold mt-4 flex items-center justify-center gap-2 active:scale-[0.96] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               <AlertTriangle size={18} />
-              {isSubmittingAction ? 'جاري الحفظ...' : 'إرسال التقرير'}
+              {isSubmittingAction ? 'جاري الحفظ...' : 'تأكيد الفشل والمرتجع'}
             </button>
             <button
-              onClick={() => { setShowFailureSheet(false); setFailureReason(''); setFailureNotes(''); }}
+              onClick={() => { setShowFailureSheet(false); setFailureReason(''); setFailureNotes(''); setReturnType('full'); setReturnQuantities({}); }}
               className="w-full h-12 text-app-text-secondary font-semibold mt-2"
             >
               إلغاء
@@ -1033,6 +1243,7 @@ export default function ShipmentDetailScreen() {
         orders={shipment.orders ?? []}
         onComplete={() => {
           showToast('تم تسجيل التحصيل بنجاح');
+          void loadShipments();
         }}
       />
 

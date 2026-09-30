@@ -391,19 +391,38 @@ export async function addTicketComment(input: {
   return data as TicketComment;
 }
 
-export async function updateTicket(ticketId: string, updates: {
-  subject?: string;
-  description?: string;
-  priority?: TicketPriority;
-  category?: string;
-  assignedTo?: string | null;
-}) {
+export async function updateTicket(
+  ticketId: string,
+  updates: {
+    subject?: string;
+    description?: string;
+    priority?: TicketPriority;
+    category?: string;
+    assignedTo?: string | null;
+    assignedDepartments?: string[];
+    assignedUserIds?: string[];
+    items?: Array<{
+      id?: string;
+      orderLineItemId?: string | null;
+      productName: string;
+      productCode?: string | null;
+      category?: string | null;
+      priority: TicketPriority;
+      description?: string | null;
+      assignedDepartments?: string[];
+      assignedUserIds?: string[];
+      status?: string;
+    }>;
+  },
+) {
   const updatePayload: Record<string, unknown> = {};
   if (updates.subject !== undefined) updatePayload.subject = updates.subject;
   if (updates.description !== undefined) updatePayload.description = updates.description;
   if (updates.priority !== undefined) updatePayload.priority = updates.priority;
   if (updates.category !== undefined) updatePayload.category = updates.category;
   if (updates.assignedTo !== undefined) updatePayload.assigned_to = updates.assignedTo;
+  if (updates.assignedDepartments !== undefined) updatePayload.assigned_departments = updates.assignedDepartments;
+  if (updates.assignedUserIds !== undefined) updatePayload.assigned_user_ids = updates.assignedUserIds;
 
   const { error } = await supabase
     .from("order_tickets")
@@ -411,6 +430,24 @@ export async function updateTicket(ticketId: string, updates: {
     .eq("id", ticketId);
 
   if (error) throw error;
+
+  if (updates.items && updates.items.length > 0) {
+    const ticketItems = updates.items.map((item) => ({
+      ticket_id: ticketId,
+      order_line_item_id: item.orderLineItemId,
+      product_name: item.productName,
+      product_code: item.productCode ?? null,
+      category: item.category ?? null,
+      priority: item.priority,
+      description: item.description ?? null,
+      assigned_departments: item.assignedDepartments ?? [],
+      assigned_user_ids: item.assignedUserIds ?? [],
+      status: (item.status as string) || "open",
+    }));
+
+    const { error: itemsError } = await supabase.from("ticket_items").insert(ticketItems);
+    if (itemsError) throw itemsError;
+  }
 }
 
 export async function fetchTicketStats() {
@@ -485,7 +522,39 @@ export interface CustomerServiceProductStat {
   product_name: string;
   ticket_count: number;
   order_count: number;
-  tickets: Array<{ id: string; subject: string; status: string; created_at: string }>;
+  ticket_ids: string[];
+}
+
+export interface CustomerServiceAnalyticsTicket {
+  id: string;
+  subject: string;
+  status: string;
+  category: string | null;
+  created_at: string;
+  resolved_at: string | null;
+  closed_at: string | null;
+  created_by_full_name: string | null;
+  assigned_to_full_name: string | null;
+  assigned_departments: string[] | null;
+  customer_full_name: string | null;
+  order_id: string | null;
+  delivery_key: string;
+  is_resolved: boolean;
+  product_keys: string[];
+}
+
+export interface CustomerServiceAnalyticsResult {
+  total: number;
+  resolved: number;
+  percentage: number;
+  byCategory: Record<string, number>;
+  byDepartment: Record<string, number>;
+  byDelivery: Record<string, number>;
+  byDay: Record<string, number>;
+  agentMap: Record<string, { total: number; resolved: number; totalTime: number; count: number }>;
+  deliveryLabels: Record<string, string>;
+  tickets: CustomerServiceAnalyticsTicket[];
+  products: CustomerServiceProductStat[];
 }
 
 function chunkValues<T>(values: T[], size = 200) {
@@ -496,151 +565,81 @@ function chunkValues<T>(values: T[], size = 200) {
   return chunks;
 }
 
-export async function fetchCustomerServiceProductAnalytics(startISO: string, endISO: string): Promise<CustomerServiceProductStat[]> {
-  // 1) Tickets in range with order reference
-  const { data: ticketRows, error: ticketError } = await supabase
-    .from("order_tickets")
-    .select("id, subject, status, created_at, order_id")
-    .gte("created_at", startISO)
-    .lte("created_at", endISO);
-  if (ticketError) throw ticketError;
-  const tickets = (ticketRows ?? []) as Array<{ id: string; subject: string; status: string; created_at: string; order_id: string | null }>;
-
-  const orderIds = Array.from(new Set(tickets.map((t) => t.order_id).filter((x): x is string => Boolean(x))));
-
-  // 2) Order lines (products) for the linked orders
-  const orderIdIndex = (id: string | null) => id;
-
-  // Group line items by order_id
-  const linesByOrder = new Map<string, Array<{ product_code: string | null; product_name: string }>>();
+export async function fetchDeliveryPickingByOrder(orderIds: string[]): Promise<Record<string, string[]>> {
+  const pickingByOrder: Record<string, string[]> = {};
   for (const chunk of chunkValues(orderIds)) {
-    const { data, error } = await supabase
-      .from("order_line_items")
-      .select("order_id, product_code, product_name, display_type, ordered_quantity")
+    const { data: docs } = await supabase
+      .from("order_delivery_documents")
+      .select("order_id, picking_state")
       .in("order_id", chunk);
-    if (error) throw error;
-    for (const row of (data ?? []) as Array<{ order_id: string; product_code: string | null; product_name: string; display_type?: string | null; ordered_quantity?: number | null }>) {
-      const displayType = String(row.display_type ?? "").trim();
-      if (displayType && displayType !== "product") continue;
-      if (Number(row.ordered_quantity ?? 0) <= 0) continue;
-      const name = String(row.product_name ?? "").trim();
-      if (!name) continue;
-      const existing = linesByOrder.get(row.order_id) ?? [];
-      existing.push({ product_code: row.product_code, product_name: name });
-      linesByOrder.set(row.order_id, existing);
+    for (const d of (docs ?? []) as Array<{ order_id: string; picking_state: string | null }>) {
+      const st = String(d.picking_state ?? "");
+      if (!st) continue;
+      const arr: string[] = pickingByOrder[d.order_id] ?? [];
+      if (!arr.includes(st)) arr.push(st);
+      pickingByOrder[d.order_id] = arr;
     }
   }
-
-  // 3) Aggregate by product (key = code if present else normalized name)
-  const productMap = new Map<string, CustomerServiceProductStat>();
-  const keyFor = (line: { product_code: string | null; product_name: string }) => {
-    const code = (line.product_code ?? "").trim();
-    if (code) return `code:${code}`;
-    return `name:${line.product_name}`;
-  };
-
-  for (const ticket of tickets) {
-    if (!ticket.order_id) continue;
-    const orderKey = orderIdIndex(ticket.order_id);
-    const lines = linesByOrder.get(orderKey ?? "");
-    if (!lines) continue;
-    for (const line of lines) {
-      const key = keyFor(line);
-      let stat = productMap.get(key);
-      if (!stat) {
-        stat = {
-          product_code: line.product_code,
-          product_name: line.product_name,
-          ticket_count: 0,
-          order_count: 0,
-          tickets: [],
-        };
-        productMap.set(key, stat);
-      }
-      const isNewTicket = !stat.tickets.some((t) => t.id === ticket.id);
-      if (isNewTicket) {
-        stat.ticket_count += 1;
-        stat.tickets.push({ id: ticket.id, subject: ticket.subject, status: ticket.status, created_at: ticket.created_at });
-      }
-    }
-  }
-
-  // Order count: unique orders per product
-  const orderCountMap = new Map<string, Set<string>>();
-  for (const ticket of tickets) {
-    if (!ticket.order_id) continue;
-    const lines = linesByOrder.get(orderIdIndex(ticket.order_id) ?? "");
-    if (!lines) continue;
-    for (const line of lines) {
-      const key = keyFor(line);
-      let set = orderCountMap.get(key);
-      if (!set) { set = new Set(); orderCountMap.set(key, set); }
-      set.add(ticket.order_id);
-    }
-  }
-  for (const [key, stat] of productMap) {
-    stat.order_count = orderCountMap.get(key)?.size ?? 0;
-  }
-
-  return Array.from(productMap.values())
-    .sort((a, b) => b.ticket_count - a.ticket_count)
-    .slice(0, 20);
+  return pickingByOrder;
 }
 
-export async function fetchCustomerServiceAnalytics(startISO: string, endISO: string) {
-  const [categoryRes, deptRes, deliveryRes, dailyRes, agentRes, ticketRows] = await Promise.all([
-    supabase.from("order_tickets").select("category").gte("created_at", startISO).lte("created_at", endISO),
-    supabase.from("order_tickets").select("assigned_departments").gte("created_at", startISO).lte("created_at", endISO),
-    supabase.from("order_tickets").select("order:orders(delivery_status), raw_payload").gte("created_at", startISO).lte("created_at", endISO),
-    supabase.from("order_tickets").select("created_at").gte("created_at", startISO).lte("created_at", endISO),
-    supabase.from("order_tickets").select("created_by, status, resolved_at, created_at").gte("created_at", startISO).lte("created_at", endISO),
-    supabase.from("order_tickets")
-      .select("id, status, created_at, resolved_at, closed_at")
-      .gte("created_at", startISO)
-      .lte("created_at", endISO),
-  ]);
-  const isResolved = (row: { status: string; resolved_at: string | null; closed_at: string | null }) =>
-    row.status === "resolved" || row.status === "closed" || Boolean(row.resolved_at || row.closed_at);
-  const rangeStart = new Date(startISO).getTime();
-  const rangeEnd = new Date(endISO).getTime();
-  const tickets = ((ticketRows?.data ?? []) as Array<{ id: string; status: string; created_at: string; resolved_at: string | null; closed_at: string | null }>)
-    .filter((row) => {
-      if (row.status === "resolved" || row.status === "closed") return true;
-      const t = new Date(row.created_at).getTime();
-      return Number.isFinite(t) && t >= rangeStart && t <= rangeEnd;
-    });
-  const total = tickets.length;
-  const resolved = tickets.filter(isResolved).length;
-  const categoryRows = (categoryRes.data ?? []) as Array<{ category: string | null }>;
-  const byCategory: Record<string, number> = {};
-  for (const row of categoryRows) { const key = row.category || "other"; byCategory[key] = (byCategory[key] || 0) + 1; }
-  const deptRows = (deptRes.data ?? []) as Array<{ assigned_departments: string[] | null }>;
-  const byDepartment: Record<string, number> = {};
-  for (const row of deptRows) { for (const d of (row.assigned_departments ?? [])) { byDepartment[d] = (byDepartment[d] || 0) + 1; } }
-  const deliveryRows = (deliveryRes.data ?? []) as Array<{ order: { delivery_status: string | null } | { delivery_status: string | null }[] | null; raw_payload: Record<string, unknown> | null }>;
-  const byDelivery: Record<string, number> = {};
-  const deliveryLabels: Record<string, string> = { full: "تم بالكامل", partial: "ارجاع جزئي", cancelled: "ارجاع كلي", pending: "قيد الانتظار", other_delivery: "أخرى", unknown: "غير معروف" };
-  for (const row of deliveryRows) {
-    const o = Array.isArray(row.order) ? row.order[0] : row.order;
-    const xlStatus = row.raw_payload?.delivery_status_xl;
-    let key = "unknown";
-    if (xlStatus) {
-      if (xlStatus === "بالكامل") key = "full";
-      else if (xlStatus === "مرتجع جزئى") key = "partial";
-      else if (["مرتجع كلى بعد الوصول","مرتجع كلى قبل الوصول","مرتجع كلي","مرتجع كلى","الغاء","مرتجع"].includes(String(xlStatus))) key = "cancelled";
-      else key = "other_delivery";
-    } else {
-      key = o?.delivery_status || "unknown";
-      if (key === "false") key = "cancelled";
-    }
-    byDelivery[key] = (byDelivery[key] || 0) + 1;
+export function resolveDeliveryKey(
+  xlStatus: unknown,
+  orderStatus: string | null | undefined,
+  pickingStates: string[],
+): string {
+  if (xlStatus) {
+    if (xlStatus === "بالكامل") return "full";
+    if (xlStatus === "مرتجع جزئى") return "partial";
+    if (["مرتجع كلى بعد الوصول","مرتجع كلى قبل الوصول","مرتجع كلي","مرتجع كلى","الغاء","مرتجع"].includes(String(xlStatus))) return "cancelled";
+    return "other_delivery";
   }
-  const dailyRows = (dailyRes.data ?? []) as Array<{ created_at: string }>;
-  const byDay: Record<string, number> = {};
-  for (const row of dailyRows) { const day = row.created_at.slice(0, 10); byDay[day] = (byDay[day] || 0) + 1; }
-  const agentRows = (agentRes.data ?? []) as Array<{ created_by: string; status: string; resolved_at: string | null; created_at: string }>;
-  const agentMap: Record<string, { total: number; resolved: number; totalTime: number; count: number }> = {};
-  for (const row of agentRows) { const a = row.created_by; if (!agentMap[a]) agentMap[a] = { total: 0, resolved: 0, totalTime: 0, count: 0 }; agentMap[a].total++; if (row.status === "resolved" || row.status === "closed") { agentMap[a].resolved++; if (row.resolved_at) { agentMap[a].totalTime += new Date(row.resolved_at).getTime() - new Date(row.created_at).getTime(); agentMap[a].count++; } } }
-  return { total, resolved, percentage: total > 0 ? Math.round((resolved / total) * 100) : 0, byCategory, byDepartment, byDelivery, byDay, agentMap, deliveryLabels };
+  if (pickingStates.length > 0) {
+    const hasCancel = pickingStates.includes("cancel");
+    const hasDone = pickingStates.includes("done");
+    const hasAssigned = pickingStates.includes("assigned");
+    if (hasCancel && hasDone) return "partial";
+    if (hasCancel) return "cancelled";
+    if (pickingStates.includes("confirmed") || pickingStates.includes("draft")) return "pending";
+    if (hasAssigned) return "pending";
+    if (hasDone) return "full";
+    return "other_delivery";
+  }
+  if (orderStatus === "false") return "cancelled";
+  if (orderStatus === "true") return "full";
+  return orderStatus || "unknown";
+}
+
+export async function fetchCustomerServiceAnalytics(
+  startISO: string,
+  endISO: string,
+): Promise<CustomerServiceAnalyticsResult> {
+  const { data, error } = await supabase.rpc("cs_analytics", {
+    p_from: startISO,
+    p_to: endISO,
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as Partial<CustomerServiceAnalyticsResult>;
+  return {
+    total: result.total ?? 0,
+    resolved: result.resolved ?? 0,
+    percentage: result.percentage ?? 0,
+    byCategory: result.byCategory ?? {},
+    byDepartment: result.byDepartment ?? {},
+    byDelivery: result.byDelivery ?? {},
+    byDay: result.byDay ?? {},
+    agentMap: result.agentMap ?? {},
+    deliveryLabels: result.deliveryLabels ?? {},
+    tickets: result.tickets ?? [],
+    products: result.products ?? [],
+  };
+}
+
+export async function fetchCustomerServiceProductAnalytics(
+  startISO: string,
+  endISO: string,
+): Promise<CustomerServiceProductStat[]> {
+  const { products } = await fetchCustomerServiceAnalytics(startISO, endISO);
+  return products;
 }
 

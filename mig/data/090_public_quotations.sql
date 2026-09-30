@@ -1,0 +1,2 @@
+COPY "public"."quotations" ("id", "created_by", "customer_id", "buyer_name", "buyer_phone", "seller_name", "seller_phone", "selected_company_ids", "extra_discount_percent", "subtotal_amount", "discount_amount", "grand_total_amount", "currency_code", "show_grand_total", "status", "pdf_storage_path", "rendered_payload", "generated_at", "created_at", "updated_at", "created_by_full_name") FROM STDIN;
+\.

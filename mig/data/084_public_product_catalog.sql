@@ -1,0 +1,2 @@
+COPY "public"."product_catalog" ("id", "name_en", "name_ar", "slug", "description_en", "description_ar", "price", "compare_at_price", "currency", "sku", "stock_quantity", "low_stock_threshold", "track_inventory", "category_id", "image_url", "gallery_urls", "status", "is_featured", "seo_title_en", "seo_title_ar", "seo_description_en", "seo_description_ar", "meta", "created_at", "updated_at") FROM STDIN;
+\.

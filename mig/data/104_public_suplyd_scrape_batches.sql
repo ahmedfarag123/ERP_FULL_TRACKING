@@ -1,0 +1,20 @@
+COPY "public"."suplyd_scrape_batches" ("id", "started_at", "completed_at", "status", "products_fetched", "products_upserted", "products_with_cost", "error_message", "metadata", "created_at") FROM STDIN;
+052b3f5d-f28e-4257-93a4-d49d7c993a5e	2026-08-04 23:00:02.881+00	2026-08-04 23:00:11.948+00	success	857	857	857	\N	{"unique_brands": 125, "total_from_api": 857, "unique_categories": 12}	2026-08-04 23:00:03.29263+00
+054c9305-32c2-4cd6-b854-787a35b30ca4	2026-07-26 23:00:02.595+00	2026-07-26 23:00:05.925+00	success	861	861	861	\N	{"unique_brands": 124, "total_from_api": 861, "unique_categories": 12}	2026-07-26 23:00:02.693674+00
+096e9781-803a-4567-9288-75a93d2b6c90	2026-07-27 23:00:04.11+00	2026-07-27 23:00:09.347+00	success	860	860	860	\N	{"unique_brands": 123, "total_from_api": 860, "unique_categories": 12}	2026-07-27 23:00:04.411485+00
+0b326dab-90f2-4a34-a36e-466558410597	2026-07-24 23:00:02.927+00	2026-07-24 23:00:06.419+00	success	858	858	858	\N	{"unique_brands": 124, "total_from_api": 858, "unique_categories": 12}	2026-07-24 23:00:03.054322+00
+148de8cf-a001-43a1-bd85-acbed6b722a6	2026-08-03 23:00:06.201+00	2026-08-03 23:00:08.745+00	success	859	859	859	\N	{"unique_brands": 125, "total_from_api": 859, "unique_categories": 12}	2026-08-03 23:00:06.325518+00
+226652e0-b4f0-4ff0-9ed6-93bb8e54eec4	2026-08-05 23:00:05.957+00	2026-08-05 23:00:10.399+00	success	857	857	857	\N	{"unique_brands": 125, "total_from_api": 857, "unique_categories": 12}	2026-08-05 23:00:06.067755+00
+299de6f6-e619-4cae-84bb-647446fb48ef	2026-07-30 23:00:01.561+00	2026-07-30 23:00:05.715+00	success	859	859	859	\N	{"unique_brands": 124, "total_from_api": 859, "unique_categories": 12}	2026-07-30 23:00:02.048212+00
+2b8c2821-e7ef-46af-8277-493c44f10af2	2026-07-22 15:44:21.774+00	2026-07-22 15:44:23.854+00	success	858	858	858	\N	{"unique_brands": 124, "total_from_api": 858, "unique_categories": 12}	2026-07-22 15:44:21.870618+00
+2e95de8f-036f-4e56-8617-83b386d031a7	2026-07-29 23:00:02.789+00	2026-07-29 23:00:06.973+00	success	861	861	861	\N	{"unique_brands": 124, "total_from_api": 861, "unique_categories": 12}	2026-07-29 23:00:02.965342+00
+3b2e6fc7-9ee4-4bcb-9270-4e711331d83b	2026-07-22 23:00:07.244+00	2026-07-22 23:00:10.051+00	success	858	858	858	\N	{"unique_brands": 124, "total_from_api": 858, "unique_categories": 12}	2026-07-22 23:00:07.359674+00
+421a5248-c789-498a-ba37-5d418b41aeb2	2026-07-28 23:00:01.797+00	2026-07-28 23:00:04.488+00	success	860	860	860	\N	{"unique_brands": 123, "total_from_api": 860, "unique_categories": 12}	2026-07-28 23:00:01.950126+00
+5b0e48ab-c75d-4220-9202-bdb137ed0140	2026-07-31 23:00:02.797+00	2026-07-31 23:00:06.786+00	success	859	859	859	\N	{"unique_brands": 124, "total_from_api": 859, "unique_categories": 12}	2026-07-31 23:00:03.086186+00
+695d0f03-341d-46e9-b59d-291e89c04590	2026-08-02 23:00:03.021+00	2026-08-02 23:00:05.835+00	success	859	859	859	\N	{"unique_brands": 125, "total_from_api": 859, "unique_categories": 12}	2026-08-02 23:00:03.139607+00
+7fd2d486-3056-4f7e-bcf6-55343308ff3e	2026-08-06 23:00:05.197+00	2026-08-06 23:00:08.123+00	success	864	864	864	\N	{"unique_brands": 125, "total_from_api": 864, "unique_categories": 12}	2026-08-06 23:00:05.287747+00
+81fa4b30-2c8c-4948-af2e-1c58c1439a62	2026-07-25 23:00:04.065+00	2026-07-25 23:00:07.584+00	success	860	860	860	\N	{"unique_brands": 124, "total_from_api": 860, "unique_categories": 12}	2026-07-25 23:00:04.265479+00
+8cac2a71-b286-4b70-a44c-9ec1f3c57c49	2026-07-22 15:40:40.734+00	2026-07-22 15:40:41.961+00	failed	0	0	0	Live upsert error: invalid input syntax for type integer: "2.5"	{}	2026-07-22 15:40:41.13561+00
+b47e8f6b-1436-4576-b227-e251c0254c78	2026-08-01 23:00:03.056+00	2026-08-01 23:00:06.625+00	success	859	859	859	\N	{"unique_brands": 124, "total_from_api": 859, "unique_categories": 12}	2026-08-01 23:00:03.322708+00
+be188e7e-8d13-40bd-928f-333a2af3ae24	2026-07-23 23:00:03.911+00	2026-07-23 23:00:07.041+00	success	858	858	858	\N	{"unique_brands": 124, "total_from_api": 858, "unique_categories": 12}	2026-07-23 23:00:04.00241+00
+\.

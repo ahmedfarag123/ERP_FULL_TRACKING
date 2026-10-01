@@ -113,7 +113,8 @@ const DEPARTMENT_COLORS: Record<string, string> = {
 const DELIVERY_COLORS: Record<string, string> = {
   full: "#059669",
   partial: "#f59e0b",
-  cancelled: "#dc2626",
+  returned: "#dc2626",
+  cancelled: "#6b7280",
   pending: "#3b82f6",
   other_delivery: "#8b5cf6",
   unknown: "#9ca3af",

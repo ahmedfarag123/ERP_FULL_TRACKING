@@ -4,6 +4,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useNavigate } from "react-router";
 import {
   BanknotesIcon,
   CheckCircleIcon,
@@ -174,6 +175,8 @@ function toAmount(value: unknown) {
 }
 
 export default function DriverSettlementsPage() {
+  const navigate = useNavigate();
+
   // ── Collection requests state ──
   const [requests, setRequests] = useState<CollectionRequestRow[]>([]);
   const [driverDebts, setDriverDebts] = useState<DriverDebtRow[]>([]);
@@ -1275,7 +1278,14 @@ export default function DriverSettlementsPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100 bg-white">
                   {collectionChecks.map((check) => (
-                    <tr key={check.id} className="hover:bg-brand-25">
+                    <tr
+                      key={check.id}
+                      className="hover:bg-brand-25 cursor-pointer"
+                      title="عرض تفاصيل الشحنة"
+                      onClick={() => {
+                        if (check.shipment_id) navigate(`/logistics/shipments/${check.shipment_id}`);
+                      }}
+                    >
                       <td className="px-4 py-3 text-xs font-medium text-gray-900">{check.driver_name}</td>
                       <td className="px-4 py-3 text-xs text-gray-600">{check.odoo_order_name || check.shipment_id.slice(0, 8) + '...'}</td>
                       <td className="px-4 py-3 text-xs text-gray-600">{check.customer_name || '—'}</td>
@@ -1299,7 +1309,7 @@ export default function DriverSettlementsPage() {
                       <td className="px-4 py-3">
                         <div className="flex gap-2">
                           <button
-                            onClick={() => { setSelectedCollectionCheck(check); setCollectionCheckNotes(""); setCollectionCheckDetailOpen(true); }}
+                            onClick={(e) => { e.stopPropagation(); setSelectedCollectionCheck(check); setCollectionCheckNotes(""); setCollectionCheckDetailOpen(true); }}
                             className="inline-flex items-center gap-1 text-gray-600 hover:text-gray-800 text-xs"
                           >
                             <EyeIcon className="h-3.5 w-3.5" />
@@ -1308,14 +1318,14 @@ export default function DriverSettlementsPage() {
                           {check.review_status === "pending" && (
                             <>
                               <button
-                                onClick={() => handleReviewCollectionCheck(check.id, "approved")}
+                                onClick={(e) => { e.stopPropagation(); handleReviewCollectionCheck(check.id, "approved"); }}
                                 className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-800 text-xs"
                               >
                                 <CheckCircleIcon className="h-3.5 w-3.5" />
                                 اعتماد
                               </button>
                               <button
-                                onClick={() => handleReviewCollectionCheck(check.id, "rejected")}
+                                onClick={(e) => { e.stopPropagation(); handleReviewCollectionCheck(check.id, "rejected"); }}
                                 className="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs"
                               >
                                 <XCircleIcon className="h-3.5 w-3.5" />

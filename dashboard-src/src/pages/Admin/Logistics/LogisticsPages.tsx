@@ -2761,6 +2761,8 @@ export function LogisticsShipmentDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [proofPhotoUrl, setProofPhotoUrl] = useState<string | null>(null);
   const [proofPhotoError, setProofPhotoError] = useState<string | null>(null);
+  const [collectionProofUrl, setCollectionProofUrl] = useState<string | null>(null);
+  const [collectionProofError, setCollectionProofError] = useState<string | null>(null);
 
   /**
    * One RPC replaces the five PostgREST queries this page used to run. It is
@@ -2803,6 +2805,29 @@ export function LogisticsShipmentDetailPage() {
       cancelled = true;
     };
   }, [(detail?.shipment as { pod_image_url?: string | null } | null)?.pod_image_url, detail]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const path = detail?.plan_check?.proof_photo_url ?? null;
+    setCollectionProofUrl(null);
+    setCollectionProofError(null);
+    if (!path) return;
+    (async () => {
+      try {
+        const url = await resolveProofStorageUrl(path);
+        if (!cancelled) setCollectionProofUrl(url);
+      } catch (signErr) {
+        if (!cancelled) {
+          setCollectionProofError(
+            signErr instanceof Error ? signErr.message : "عترد تحميل صورة إثبات التحصيل.",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [detail?.plan_check?.proof_photo_url, detail]);
 
   useEffect(() => {
     if (!shipmentId) return;
@@ -3593,6 +3618,8 @@ export function LogisticsShipmentDetailPage() {
             )}
           </ShipmentDetailCard>
 
+          <div className="grid gap-5 lg:grid-cols-2">
+
           {/* ── إثبات التسليم ───────────────────────────────────────────── */}
           <ShipmentDetailCard>
             <ShipmentDetailCardHeader
@@ -3630,7 +3657,50 @@ export function LogisticsShipmentDetailPage() {
             )}
           </ShipmentDetailCard>
 
-          {/* ── أصناف الشحنة ───────────────────────────────────────────── */}
+          <ShipmentDetailCard>
+            <ShipmentDetailCardHeader
+              title="إثبات التحصيل"
+              subtitle="الصورة التي التقطها السائق عند تحصيل التحصيل"
+            />
+            {!planCheck?.proof_photo_url ? (
+              <div className="flex min-h-[200px] items-center px-5 py-12">
+                <EmptyState
+                  title="لا توجد صورة إثبات تحصيل"
+                  description={
+                    planCheck?.exists
+                      ? "الفحص موجود لكن السائق لم يرفع صورة إثبات لهذه الشحنة."
+                      : "لم يّرسل سائق فحص تحصيل لهذه الشحنة بعد."
+                  }
+                />
+              </div>
+            ) : collectionProofError ? (
+              <div className="flex min-h-[200px] items-center px-5 py-12">
+                <EmptyState title="عترد تحميل صورة الإثبات" description={collectionProofError} />
+              </div>
+            ) : !collectionProofUrl ? (
+              <div className="flex min-h-[200px] items-center px-5 py-12">
+                <EmptyState title="جاري تحميل صورة الإثبات..." description="يتم إنشاء رابط التحميل الآن." />
+              </div>
+            ) : (
+              <div className="px-5 py-5">
+                <a href={collectionProofUrl} target="_blank" rel="noreferrer">
+                  <img
+                    src={collectionProofUrl}
+                    alt="إثبات التحصيل"
+                    className="mx-auto max-h-[520px] rounded-2xl border border-gray-200 object-contain dark:border-gray-800"
+                  />
+                </a>
+                {planCheck?.created_at ? (
+                  <p className="mt-3 text-center text-xs text-gray-400 dark:text-gray-500">
+                    تم التقطه في {formatDateTime(planCheck.created_at)}
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </ShipmentDetailCard>
+          </div>
+
+          {/* ──  ───────────────────────────────────────────── */}
           <ShipmentDetailCard>
             <ShipmentDetailCardHeader
               title="أصناف الشحنة"

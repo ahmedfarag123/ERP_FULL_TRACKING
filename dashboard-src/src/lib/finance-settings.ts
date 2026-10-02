@@ -128,14 +128,9 @@ export async function postDriverSettlement(settlementId: string): Promise<string
 }
 
 export async function approveDriverSettlement(settlementId: string): Promise<void> {
-  const { error } = await supabase
-    .from("finance_driver_settlements")
-    .update({
-      status: "approved",
-      approved_at: new Date().toISOString(),
-    })
-    .eq("id", settlementId)
-    .eq("status", "draft");
+  const { error } = await supabase.rpc("approve_driver_settlement", {
+    p_settlement_id: settlementId,
+  });
 
   if (error) throw new Error(error.message);
 }

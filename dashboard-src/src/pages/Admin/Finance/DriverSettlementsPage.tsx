@@ -148,6 +148,8 @@ const SETTLEMENT_STATUS_LABELS: Record<SettlementStatus, { label: string; tone: 
   paid: { label: "مدفوع", tone: "green" },
 };
 
+const CHECKS_PAGE_SIZE = 25;
+
 function collectionStatusTone(status: string): StatusBadgeTone {
   if (status === "approved") return "green";
   if (status === "rejected") return "red";
@@ -238,6 +240,7 @@ export default function DriverSettlementsPage() {
   const [collectionCheckDetailOpen, setCollectionCheckDetailOpen] = useState(false);
   const [collectionCheckNotes, setCollectionCheckNotes] = useState("");
   const [collectionCheckFilter, setCollectionCheckFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
+  const [checksPage, setChecksPage] = useState(1);
 
   // ── Modals ──
   const [selectedRequest, setSelectedRequest] = useState<CollectionRequestRow | null>(null);
@@ -336,54 +339,10 @@ export default function DriverSettlementsPage() {
 
       setRequests(enriched);
 
-      // Compute driver debts client-side from collection requests
-      const now = new Date();
-      const todayStr = now.toDateString();
-      const debtMap = new Map<string, DriverDebtRow>();
-      for (const row of enriched) {
-        const did = row.driver_profile_id;
-        if (!debtMap.has(did)) {
-          debtMap.set(did, {
-            driver_profile_id: did,
-            driver_name: row.driver_name ?? "غير معروف",
-            driver_email: row.driver_email ?? "",
-            total_debt: 0,
-            currency_code: "EGP",
-            oldest_debt_at: null,
-            hours_since_oldest: 0,
-            overdue: false,
-            pending_requests: 0,
-            approved_today: 0,
-            total_collected_today: 0,
-            total_approved_amount: 0,
-          });
-        }
-        const d = debtMap.get(did)!;
-        if (row.status === "pending") {
-          d.pending_requests++;
-          d.total_debt += row.collected_amount;
-          const created = new Date(row.created_at);
-          if (!d.oldest_debt_at || created < new Date(d.oldest_debt_at)) {
-            d.oldest_debt_at = row.created_at;
-          }
-        }
-        if (row.status === "approved") {
-          d.total_approved_amount += row.collected_amount;
-          if (row.reviewed_at && new Date(row.reviewed_at).toDateString() === todayStr) {
-            d.approved_today++;
-            d.total_collected_today += row.collected_amount;
-          }
-        }
-      }
-      // Compute hours_since_oldest and overdue
-      for (const d of debtMap.values()) {
-        if (d.oldest_debt_at) {
-          const hours = (now.getTime() - new Date(d.oldest_debt_at).getTime()) / 3600000;
-          d.hours_since_oldest = Math.round(hours * 10) / 10;
-          d.overdue = hours > 24;
-        }
-      }
-      setDriverDebts(Array.from(debtMap.values()).filter((d) => d.total_debt > 0).sort((a, b) => b.total_debt - a.total_debt));
+      // Driver debts computed server-side (from delivered shipments)
+      const { data: debtRows, error: debtErr } = await supabase.rpc("admin_get_driver_debts");
+      if (debtErr) throw debtErr;
+      setDriverDebts((debtRows ?? []) as DriverDebtRow[]);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "تعذر تحميل بيانات التحصيل.");
       setRequests([]);
@@ -704,10 +663,10 @@ export default function DriverSettlementsPage() {
   }, [requests, driverDebts]);
 
   const settlementKpis = useMemo(() => {
-    const totalSettlements = settlements.length;
-    const draftCount = settlements.filter((s) => s.status === "draft").length;
-    const totalPlanValue = settlements.reduce((sum, s) => sum + s.cash_collected, 0);
-    const totalNet = settlements.reduce((sum, s) => sum + s.net_payable, 0);
+    const totalSettlements = filteredSettlements.length;
+    const draftCount = filteredSettlements.filter((s) => s.status === "draft").length;
+    const totalPlanValue = filteredSettlements.reduce((sum, s) => sum + s.cash_collected, 0);
+    const totalNet = filteredSettlements.reduce((sum, s) => sum + s.net_payable, 0);
 
     return {
       totalSettlements,
@@ -715,7 +674,7 @@ export default function DriverSettlementsPage() {
       totalPlanValue,
       totalNet,
     };
-  }, [settlements]);
+  }, [filteredSettlements]);
 
   // ── Handlers: Collection requests ──
   const handleApproveRequest = async () => {
@@ -983,43 +942,59 @@ export default function DriverSettlementsPage() {
   };
 
   const handleApproveSettlement = async (settlementId: string) => {
+    if (isProcessing) return;
+    setIsProcessing(true);
     try {
       await approveDriverSettlement(settlementId);
       await loadSettlements();
     } catch (approveError) {
       setError(approveError instanceof Error ? approveError.message : "تعذر اعتماد التسوية.");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   const handlePostSettlement = async (settlementId: string) => {
+    if (isProcessing) return;
+    setIsProcessing(true);
     try {
       await postDriverSettlement(settlementId);
       await loadSettlements();
     } catch (postError) {
       setError(postError instanceof Error ? postError.message : "تعذر ترحيل التسوية.");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   const handleDeleteDraftSettlement = async (settlement: SettlementRow) => {
+    if (isProcessing) return;
     const confirmed = window.confirm(
       `حذف مسودة تسوية ${settlement.driver_name ?? ""} للفترة ${formatDate(settlement.period_start)} → ${formatDate(settlement.period_end)}؟`
     );
 
     if (!confirmed) return;
 
+    setIsProcessing(true);
     try {
       setError(null);
-      const { error: deleteError } = await supabase
+      const { data: deletedRows, error: deleteError } = await supabase
         .from("finance_driver_settlements")
         .delete()
         .eq("id", settlement.id)
-        .eq("status", "draft");
+        .eq("status", "draft")
+        .select("id");
 
       if (deleteError) throw deleteError;
+      if (!deletedRows || deletedRows.length === 0) {
+        throw new Error("لم يتم الحذف — التسوية ليست مسودة أو لم تعد موجودة.");
+      }
 
       await loadSettlements();
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "تعذر حذف مسودة التسوية.");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -1102,6 +1077,86 @@ export default function DriverSettlementsPage() {
             tone="blue"
           />
         </AdminMetricGrid>
+
+        {/* ── Collection Requests ── */}
+        <AdminSection
+          title="طلبات التحصيل"
+          description="طلبات تحصيل السائقين — موافقة أو رفض مع صور الإيصالات"
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              {COLLECTION_STATUS_TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setCollectionStatusFilter(tab.key)}
+                  className={`h-9 rounded-full px-4 text-sm font-medium transition ${
+                    collectionStatusFilter === tab.key
+                      ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900"
+                      : "bg-brand-25 text-gray-600 hover:bg-brand-25 dark:bg-white/[0.02] dark:text-gray-300"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+              <div className="relative">
+                <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={searchValue}
+                  onChange={(event) => setSearchValue(event.target.value)}
+                  placeholder="ابحث باسم السائق أو الخطة..."
+                  className="h-9 w-56 rounded-lg border border-gray-300 bg-transparent py-2.5 pr-9 pl-4 text-sm text-gray-800 outline-none focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                />
+              </div>
+            </div>
+          }
+        >
+          {isLoading ? (
+            <div className="py-8 text-center text-sm text-gray-500">جار تحميل الطلبات...</div>
+          ) : filteredRequests.length === 0 ? (
+            <div className="py-8 text-center text-sm text-gray-500">لا توجد طلبات تطابق التصفية</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-4 py-3">السائق</th>
+                    <th className="px-4 py-3">الخطة</th>
+                    <th className="px-4 py-3">المبلغ</th>
+                    <th className="px-4 py-3">الحالة</th>
+                    <th className="px-4 py-3">تاريخ الإنشاء</th>
+                    <th className="px-4 py-3">إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredRequests.map((req) => (
+                    <tr key={req.id} className="hover:bg-brand-25">
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-gray-900 dark:text-white">{req.driver_name}</p>
+                        <p className="text-xs text-gray-500">{req.driver_email}</p>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-600">{req.plan_reference || "--"}</td>
+                      <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{formatMoney(req.collected_amount)}</td>
+                      <td className="px-4 py-3">
+                        <StatusBadge label={collectionStatusLabel(req.status)} tone={collectionStatusTone(req.status)} />
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-600">{formatDateTime(req.created_at)}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => openRequestDetail(req)}
+                          className="inline-flex items-center gap-1 text-gray-600 hover:text-gray-800 text-xs"
+                        >
+                          <EyeIcon className="h-3.5 w-3.5" />
+                          عرض
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </AdminSection>
 
         {/* ── Driver Debts ── */}
         {driverDebts.length > 0 && (
@@ -1208,6 +1263,7 @@ export default function DriverSettlementsPage() {
                             <>
                               <button
                                 onClick={() => handleReviewPlanSettlement(req.id, "approved")}
+                                disabled={isProcessing}
                                 className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs"
                               >
                                 <CheckCircleIcon className="h-3.5 w-3.5" />
@@ -1215,6 +1271,7 @@ export default function DriverSettlementsPage() {
                               </button>
                               <button
                                 onClick={() => handleReviewPlanSettlement(req.id, "rejected")}
+                                disabled={isProcessing}
                                 className="inline-flex items-center gap-1 text-rose-600 hover:text-rose-800 text-xs"
                               >
                                 <XCircleIcon className="h-3.5 w-3.5" />
@@ -1225,6 +1282,7 @@ export default function DriverSettlementsPage() {
                           {req.status === "approved" && (
                             <button
                               onClick={() => handleMarkPlanSettlementPaid(req.id)}
+                              disabled={isProcessing}
                               className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-800 text-xs"
                             >
                               <BanknotesIcon className="h-3.5 w-3.5" />
@@ -1248,7 +1306,7 @@ export default function DriverSettlementsPage() {
           actions={
             <select
               value={collectionCheckFilter}
-              onChange={(e) => setCollectionCheckFilter(e.target.value as typeof collectionCheckFilter)}
+              onChange={(e) => { setCollectionCheckFilter(e.target.value as typeof collectionCheckFilter); setChecksPage(1); }}
               className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
             >
               <option value="all">الكل</option>
@@ -1265,6 +1323,7 @@ export default function DriverSettlementsPage() {
           ) : collectionChecks.length === 0 ? (
             <p className="py-8 text-center text-sm text-gray-500">لا توجد فحوصات تحصيل</p>
           ) : (
+            <>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 text-sm">
                 <thead className="bg-brand-25 text-xs text-gray-500">
@@ -1281,7 +1340,7 @@ export default function DriverSettlementsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 bg-white">
-                  {collectionChecks.map((check) => (
+                  {collectionChecks.slice((checksPage - 1) * CHECKS_PAGE_SIZE, checksPage * CHECKS_PAGE_SIZE).map((check) => (
                     <tr
                       key={check.id}
                       className="hover:bg-brand-25 cursor-pointer"
@@ -1325,6 +1384,7 @@ export default function DriverSettlementsPage() {
                             <>
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleReviewCollectionCheck(check.id, "approved"); }}
+                                disabled={isProcessing}
                                 className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-800 text-xs"
                               >
                                 <CheckCircleIcon className="h-3.5 w-3.5" />
@@ -1332,6 +1392,7 @@ export default function DriverSettlementsPage() {
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleReviewCollectionCheck(check.id, "rejected"); }}
+                                disabled={isProcessing}
                                 className="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs"
                               >
                                 <XCircleIcon className="h-3.5 w-3.5" />
@@ -1353,6 +1414,33 @@ export default function DriverSettlementsPage() {
                 </tbody>
               </table>
             </div>
+
+            {collectionChecks.length > CHECKS_PAGE_SIZE && (
+              <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
+                <span>
+                  صفحة {checksPage} من {Math.max(1, Math.ceil(collectionChecks.length / CHECKS_PAGE_SIZE))} — إجمالي {collectionChecks.length} فحص
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setChecksPage((page) => Math.max(1, page - 1))}
+                    disabled={checksPage <= 1}
+                    className="h-9 rounded-lg border border-gray-300 px-3 text-sm disabled:opacity-40 dark:border-gray-700"
+                  >
+                    السابق
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChecksPage((page) => Math.min(Math.max(1, Math.ceil(collectionChecks.length / CHECKS_PAGE_SIZE)), page + 1))}
+                    disabled={checksPage >= Math.ceil(collectionChecks.length / CHECKS_PAGE_SIZE)}
+                    className="h-9 rounded-lg border border-gray-300 px-3 text-sm disabled:opacity-40 dark:border-gray-700"
+                  >
+                    التالي
+                  </button>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </AdminSection>
 
@@ -1552,6 +1640,7 @@ export default function DriverSettlementsPage() {
                               <>
                                 <button
                                   onClick={() => handleApproveSettlement(s.id)}
+                                  disabled={isProcessing}
                                   className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs"
                                 >
                                   <CheckCircleIcon className="h-3.5 w-3.5" />
@@ -1559,6 +1648,7 @@ export default function DriverSettlementsPage() {
                                 </button>
                                 <button
                                   onClick={() => handleDeleteDraftSettlement(s)}
+                                  disabled={isProcessing}
                                   className="inline-flex items-center gap-1 text-rose-600 hover:text-rose-800 text-xs"
                                 >
                                   <TrashIcon className="h-3.5 w-3.5" />
@@ -1569,6 +1659,7 @@ export default function DriverSettlementsPage() {
                             {s.status === "approved" && (
                               <button
                                 onClick={() => handlePostSettlement(s.id)}
+                                disabled={isProcessing}
                                 className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-800 text-xs"
                               >
                                 <PaperAirplaneIcon className="h-3.5 w-3.5" />

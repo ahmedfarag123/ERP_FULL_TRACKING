@@ -1423,6 +1423,7 @@ export interface AllShipmentRow {
   planReference: string | null;
   planStatus: string | null;
   driverName: string | null;
+  coDriverNames: string[];
   completedAt: string | null;
   createdAt: string;
   deliveryDate: string | null;
@@ -1821,7 +1822,7 @@ export async function fetchAllShipments(range?: DateRangeValue): Promise<AllShip
   let query = supabase
     .from("logistics_shipments")
     .select(
-      "id, shipment_reference, external_shipment_id, customer_name, warehouse_name, shipment_status, plan_id, assigned_user_name, completed_at, created_at, total_gmv, is_return_shipment, scheduled_at, orders:linked_order_id(commitment_date, amount_total, total_amount, currency_code, user_id, assigned_user_id_full_name), logistics_delivery_plans!left(plan_reference, plan_status)",
+      "id, shipment_reference, external_shipment_id, customer_name, warehouse_name, shipment_status, plan_id, assigned_user_name, completed_at, created_at, total_gmv, is_return_shipment, scheduled_at, orders:linked_order_id(commitment_date, amount_total, total_amount, currency_code, user_id, assigned_user_id_full_name), logistics_delivery_plans!left(plan_reference, plan_status, logistics_users:logistics_user_id(employee_name))",
     )
     .not("source", "eq", "manual_test")
     .order("created_at", { ascending: false });
@@ -1842,6 +1843,14 @@ export async function fetchAllShipments(range?: DateRangeValue): Promise<AllShip
       (row: any): [string, string | null] => [String(row.user_id).trim(), row.salesperson_name ?? null],
     ),
   );
+  const planIds = Array.from(
+    new Set(
+      (data ?? [])
+        .map((row: any) => (row.plan_id ? String(row.plan_id) : ""))
+        .filter((id: string) => Boolean(id)),
+    ),
+  );
+  const coDriverMap = await fetchPlanCoDrivers(planIds);
 
   return (data ?? []).map((row: any) => {
     const plan = row.logistics_delivery_plans;
@@ -1858,7 +1867,8 @@ export async function fetchAllShipments(range?: DateRangeValue): Promise<AllShip
       planId: row.plan_id ?? null,
       planReference: plan?.plan_reference ?? null,
       planStatus: plan?.plan_status ?? null,
-      driverName: row.assigned_user_name ?? null,
+      driverName: plan?.logistics_users?.employee_name ?? row.assigned_user_name ?? null,
+      coDriverNames: (coDriverMap.get(String(row.plan_id)) ?? []).map((co) => co.displayName ?? "").filter(Boolean),
       completedAt: row.completed_at ?? null,
       createdAt: row.created_at,
       deliveryDate: dateOnly(order?.commitment_date ?? row.scheduled_at),

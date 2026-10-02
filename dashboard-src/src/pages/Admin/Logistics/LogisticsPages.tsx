@@ -1280,7 +1280,12 @@ export function LogisticsShipmentsPage() {
                           <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{formatDate(row.deliveryDate)}</td>
                           <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{row.warehouseName ?? "--"}</td>
                           <td className="px-4 py-4 font-semibold">{row.totalGmv != null ? formatMoney(row.totalGmv) : "--"}</td>
-                          <td className="px-4 py-4 text-gray-500 dark:text-gray-400">{row.driverName ?? "--"}</td>
+                          <td className="px-4 py-4 text-gray-500 dark:text-gray-400">
+                            {row.driverName ?? "--"}
+                            {(row.coDriverNames ?? []).length > 0 ? (
+                              <p className="mt-0.5 text-[11px] text-gray-400">مشارك: {(row.coDriverNames ?? []).join("، ")}</p>
+                            ) : null}
+                          </td>
                           <td className="px-4 py-4"><StatusBadge label={status.label} tone={status.tone} dot /></td>
                           <td className="px-4 py-4">{row.planId ? <StatusBadge label={planBadge.label} tone={planBadge.tone} dot /> : <StatusBadge label="غير مخطط" tone="red" dot />}</td>
                           <td className="px-4 py-4">

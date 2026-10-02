@@ -230,6 +230,8 @@ export default function DriverSettlementsPage() {
     admin_notes: string | null;
     reviewed_at: string | null;
     created_at: string;
+    shipment_price: number | string | null;
+    telesales_name: string | null;
   }[]>([]);
   const [collectionChecksLoading, setCollectionChecksLoading] = useState(true);
   const [selectedCollectionCheck, setSelectedCollectionCheck] = useState<typeof collectionChecks[0] | null>(null);
@@ -1270,6 +1272,8 @@ export default function DriverSettlementsPage() {
                     <th className="px-4 py-3 text-right">السائق</th>
                     <th className="px-4 py-3 text-right">رقم الطلب</th>
                     <th className="px-4 py-3 text-right">العميل</th>
+                    <th className="px-4 py-3 text-right">السعر</th>
+                    <th className="px-4 py-3 text-right">التيلي سيلز</th>
                     <th className="px-4 py-3 text-right">الحالة</th>
                     <th className="px-4 py-3 text-right">طريقة الدفع</th>
                     <th className="px-4 py-3 text-right">التاريخ</th>
@@ -1289,6 +1293,8 @@ export default function DriverSettlementsPage() {
                       <td className="px-4 py-3 text-xs font-medium text-gray-900">{check.driver_name}</td>
                       <td className="px-4 py-3 text-xs text-gray-600">{check.odoo_order_name || check.shipment_id.slice(0, 8) + '...'}</td>
                       <td className="px-4 py-3 text-xs text-gray-600">{check.customer_name || '—'}</td>
+                      <td className="px-4 py-3 text-xs font-semibold text-gray-900">{check.shipment_price != null && check.shipment_price !== '' ? formatMoney(toAmount(check.shipment_price)) : '—'}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600">{check.telesales_name || '—'}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                           check.check_status === "collected"

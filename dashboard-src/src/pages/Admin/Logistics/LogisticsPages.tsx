@@ -1110,6 +1110,11 @@ export function LogisticsShipmentsPage() {
   const [showPlanPanel, setShowPlanPanel] = useState(false);
   const query = useQuery({ queryKey: [...ROOT_QUERY, "all-shipments", dateRange[0]?.toISOString(), dateRange[1]?.toISOString()], queryFn: () => fetchAllShipments(dateRange), refetchInterval: 15000 });
 
+  const handleDateRangeChange = useCallback((next: DateRangeValue) => {
+    setDateRange(next);
+    setPage(1);
+  }, []);
+
   const filtered = (query.data ?? [])
     .filter((row) => includesSearch([row.reference, row.customerName, row.salesperson, row.warehouseName, row.driverName, row.shipmentStatus, row.planReference, row.planStatus], search))
     .filter((row) => {
@@ -1197,6 +1202,15 @@ export function LogisticsShipmentsPage() {
                   </button>
                 );
               })}
+            </div>
+            <div className="w-72">
+              <DateRangePicker
+                id="logistics-shipments-range"
+                label="تاريخ التسليم"
+                placeholder="اختر يوم وتاريخ"
+                value={dateRange}
+                onChange={handleDateRangeChange}
+              />
             </div>
             <button
               type="button"
